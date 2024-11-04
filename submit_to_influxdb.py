@@ -1,16 +1,16 @@
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from datetime import datetime
+from app.config import settings
 
 # Define your InfluxDB credentials
-#url = "http://192.38.87.126:8086"  # Replace with your InfluxDB URL
-url = "http://arctic-lorawan.sustain.dtu.dk:8086"  # Replace with your InfluxDB URL
-token = "XXXXXXXXXX"  # Replace with your InfluxDB token
-org = "DTU_SUSTAIN"  # Replace with your InfluxDB organization
+url = settings.influxdb_url
+token = settings.influxdb_token
+org = settings.influxdb_org
 bucket = "test_bucket"  # Replace with your InfluxDB bucket name
 
 # Payload data
 payload = {
-    "MessageType": "Ctest2",
+    "MessageType": "Ctest3",
     "rssi": "-83",
     "SensorNr": "3",
     "fPort": 8,

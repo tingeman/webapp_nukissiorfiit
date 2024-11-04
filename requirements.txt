@@ -1,5 +1,9 @@
 influxdb-client
 pandas
 matplotlib
-pydantic-settings
+pydantic
+python-dotenv
+dash
+plotly
+dash-ag-grid
 
