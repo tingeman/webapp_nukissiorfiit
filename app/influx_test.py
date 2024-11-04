@@ -1,12 +1,13 @@
 from influxdb_client import InfluxDBClient
 import pandas as pd
 from matplotlib import pyplot as plt
+from config import settings
 
 # Define your InfluxDB credentials
-url = "http://192.38.87.126:8086"  # Replace with your InfluxDB URL
-token = "XXXXXXXXXXXX"  # Replace with your InfluxDB token
-org = "DTU_SUSTAIN"  # Replace with your InfluxDB organization
-DEBUG_MODE = False
+url = settings.influxdb_url
+token = settings.influxdb_token
+org = settings.influxdb_org
+DEBUG_MODE = settings.debug_mode
 
 
 def connect_to_influxdb(url, token, org):

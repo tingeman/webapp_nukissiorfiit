@@ -1,5 +1,6 @@
 # Project specific
 *.png
+*.env
 
 
 # Byte-compiled / optimized / DLL files
