@@ -45,6 +45,86 @@ def list_tags(client, bucket, measurement):
         print(f"Failed to list tags: {e}")
         return []
 
+
+def get_measurement_from_influxdb(bucket, dev_eui, measurements, start, stop='now()'):    
+    client = connect_to_influxdb(url, token, org)
+    
+
+    query_api = client.query_api()
+    
+    if isinstance(measurements, str):
+        measurements_filter = f'r["_measurement"] == "{measurements}"'
+    else:
+        measurements_filter = " or ".join([f'r["_measurement"] == "{measurement}"' for measurement in measurements])
+    
+    query = f'''
+    // Query for the value measurements
+    payloadData = from(bucket: "{bucket}")
+    |> range(start: {start}, stop: {stop})
+    |> filter(fn: (r) => r["dev_eui"] == "{dev_eui}")
+    |> filter(fn: (r) => r["application_name"] == "Transmission Line Kangerluarsuk Ungalleq")
+    |> filter(fn: (r) => {measurements_filter})
+    //|> filter(fn: (r) => r["_field"] == "value")
+    //|> rename(columns: {{_value: "_payload_value"}})  // Rename to avoid conflict during join
+
+    // Query for the timestamp measurement (device_frmpayload_data_Timestamp)
+    timestampData = from(bucket: "{bucket}")
+    |> range(start: {start}, stop: {stop})
+    |> filter(fn: (r) => r["dev_eui"] == "{dev_eui}")
+    |> filter(fn: (r) => r["application_name"] == "Transmission Line Kangerluarsuk Ungalleq")
+    |> filter(fn: (r) => r["_measurement"] == "device_frmpayload_data_Timestamp")
+    //|> filter(fn: (r) => r["_field"] == "value")
+    // Keep only certain fields from the timestampData (for example, _value and _time)
+    |> keep(columns: ["dev_eui", "_time", "_value"])
+    |> rename(columns: {{_value: "_payload_timestamp"}})  // Rename timestamp value
+
+    // Join the value and timestamp data
+    join(
+    tables: {{payload: payloadData, timestamp: timestampData}},
+    on: ["dev_eui", "_time"]
+    )
+    |> yield(name: "result")
+    '''
+
+    if DEBUG_MODE:
+        print(f"Query:\n{query}")
+
+    tables = query_api.query(query)
+
+    if DEBUG_MODE:
+        print(f"Tables:\n{tables}")
+        for table in tables:
+            print(f"Table:\n{table}")
+        for record in tables[0].records:
+            print(f"Record:\n{record}")
+
+    # data = [
+    #     {
+    #         "time": record.get_time(),
+    #         "field": record.get_field(),
+    #         "value": record.get_value()
+    #     }
+    #     for table in tables for record in table.records
+    # ]
+    # return data
+
+            # Convert to Pandas DataFrame, retaining all columns
+    data = []
+    for table in tables:
+        for record in table.records:
+            record_dict = {
+                "time": record.get_time(),
+                "measurement": record.get_measurement(),
+                "field": record.get_field(),
+                "value": record.get_value(),
+            }
+            record_dict.update(record.values)  # Add all other columns/attributes
+            data.append(record_dict)
+    
+    df = pd.DataFrame(data)
+    return df
+
+
 def get_data_from_measurement(client, bucket, measurements, timestamp_measurement, start, stop):
     try:
         query_api = client.query_api()
