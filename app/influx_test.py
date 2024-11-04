@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 
 # Define your InfluxDB credentials
 url = "http://192.38.87.126:8086"  # Replace with your InfluxDB URL
-token = "XXXXXXXXXX"  # Replace with your InfluxDB token
+token = "XXXXXXXXXXX  # Replace with your InfluxDB token
 org = "DTU_SUSTAIN"  # Replace with your InfluxDB organization
 DEBUG_MODE = False
 
@@ -337,7 +337,7 @@ def plot_measurements(df):
             ax.plot(subset['time'], subset['value'], label=measurement)
 
         ax.set_xlabel('Time')
-        ax.set_ylabel('Temperature (Â°C)')
+        ax.set_ylabel('Temperature (°C)')
         ax.set_title('Measurements Over Time')
         ax.legend()
         ax.grid(True)
