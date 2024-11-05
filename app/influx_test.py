@@ -2,12 +2,107 @@ from influxdb_client import InfluxDBClient
 import pandas as pd
 from matplotlib import pyplot as plt
 from config import settings
+import plotly.express as px
+import dash_bootstrap_components as dbc
+from dash import Dash, Input, Output, callback, dcc, html
 
 # Define your InfluxDB credentials
 url = settings.influxdb_url
 token = settings.influxdb_token
 org = settings.influxdb_org
 DEBUG_MODE = settings.debug_mode
+
+
+
+
+def all_graphs(df_gt, df_airtemp, df_rh, df_bp, df_incl, mast):
+    fig_gt = px.line(
+        df_gt,
+        x='time',
+        y='value',
+        color='measurement',
+        title=f"Ground Temperature - {mast}",
+        labels={'value': 'Temperature (°C)', 'time': 'Time'}
+    )
+    fig_gt.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Temperature (°C)',
+        legend_title='Measurement',
+        template='plotly_white'
+    )
+
+    fig_airtemp = px.line(
+        df_airtemp,
+        x='time',
+        y='value',
+        color='measurement',
+        title=f"Air Temperature - {mast}",
+        labels={'value': 'Air Temperature (°C)', 'time': 'Time'}
+    )
+    fig_airtemp.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Air Temperature (°C)',
+        showlegend=False,
+        template='plotly_white'
+    )
+
+    fig_rh = px.line(
+        df_rh,
+        x='time',
+        y='value',
+        color='measurement',
+        title=f"Relative Humidity - {mast}",
+        labels={'value': 'Relative Humidity (%)', 'time': 'Time'}
+    )
+    fig_rh.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Relative Humidity (%)',
+        showlegend=False,
+        template='plotly_white'
+    )
+
+    fig_bp = px.line(
+        df_bp,
+        x='time',
+        y='value',
+        color='measurement',
+        title=f"Barometric Pressure - {mast}",
+        labels={'value': 'Barometric Pressure (kPa)', 'time': 'Time'}
+    )
+    fig_bp.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Barometric Pressure (kPa)',
+        showlegend=False,
+        template='plotly_white'
+    )
+
+    fig_incl = px.line(
+        df_incl,
+        x='time',
+        y='value',
+        color='measurement',
+        title=f"Inclination Parameters - {mast}",
+        labels={'value': 'Inclinations', 'time': 'Time'}
+    )
+    fig_incl.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Inclinations',
+        legend_title='Measurement',
+        template='plotly_white'
+    )
+
+    graph1 = dcc.Graph(figure=fig_gt, className="border")
+    graph2 = dcc.Graph(figure=fig_airtemp, className="border")
+    graph3 = dcc.Graph(figure=fig_rh, className="border")
+    graph4 = dcc.Graph(figure=fig_bp, className="border")
+    graph5 = dcc.Graph(figure=fig_incl, className="border")
+
+    return [
+        dbc.Row([dbc.Col(graph1, lg=6), dbc.Col(graph2, lg=6)]),
+        dbc.Row([dbc.Col(graph3, lg=6), dbc.Col(graph4, lg=6)]),
+        dbc.Row([dbc.Col(graph5, lg=6)], className="mt-4"),
+    ]
+
 
 
 def connect_to_influxdb(url, token, org):
@@ -516,7 +611,7 @@ if __name__ == "__main__":
             start_time = "2023-01-01T00:00:00Z"
             res = get_message_of_type_by_index('PS', -499, start_time)
 
-        if True:
+        if False:
 
             # Retrieve all payload MassageType entries in data_bucket
             measurement_name = "device_frmpayload_data_Payload"
