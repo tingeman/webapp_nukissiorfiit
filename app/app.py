@@ -5,7 +5,10 @@ from influxdb_client import InfluxDBClient
 import dash_ag_grid as dag
 import ast
 import influx_test
-
+import dash_bootstrap_components as dbc
+import datetime
+from datetime import datetime as dt
+from dateutil.relativedelta import relativedelta
 
 
 mastopt = ["Mast 6", "Mast 7", "Mast 9", "Mast 12", "Mast 13"]
@@ -20,25 +23,38 @@ codenamesformasts = ['feedbeefcafe0002',     #Mast6 has position 1 in list with 
                     'feedbeefcafe0005']     #Mast13
 
 mast_dict = {'Mast 6': 'feedbeefcafe0002',
-             'Mast 7': 'xxxx'}
+             'Mast 7': 'feedbeefcafe0003',
+             'Mast 9': 'feedbeefcafe0001',
+             'Mast 12': 'feedbeefcafe0004',
+             'Mast 13': 'feedbeefcafe0005'}
 
-
+end_date = datetime.date.today()
+start_date = end_date - relativedelta(months=1)
 
 app = Dash(__name__)
 
 app.layout = html.Div(
     [
+        dbc.Row(dbc.Col(html.H1('Structural Health Monitoring Power Line Masts Kangerluarsuk Ungalleq'), width="auto")),
+        html.H5("Select the date range (YYYY/MM/DD)"),
+        dbc.Row([dbc.Col(html.Div(dcc.DatePickerRange(id='date-range-picker',
+                                             min_date_allowed=dt(2023, 1, 1),
+                                             max_date_allowed=dt.now(),
+                                             initial_visible_month=dt.now(),
+                                             start_date_placeholder_text='Start Date',
+                                             end_date_placeholder_text='End Date',
+                                             start_date=start_date,
+                                             end_date=end_date,
+                                             persistence=True,
+                                             persistence_type='session',
+                                             display_format='YYYY/MM/DD',), className='dash-bootstrap'), width=3),
+                 ]),
         html.H5("Mast"),
         dcc.Dropdown(
             id="mast", options=["Mast 6", "Mast 7", "Mast 9", "Mast 12", "Mast 13"]
         ),
-        html.H5("Parameter"),
-        dcc.Dropdown(
-            id="parameter",
-            options=["Ground Temperatures", "Weather data", "Inclination data"]
-        ),
         html.Br(),
-        dcc.Graph(id="graph"),  # Placeholder for the graph
+        dbc.Row(dbc.Col(html.Div(id="graph"))),  # Placeholder for the graph
         dag.AgGrid(  # Placeholder for the table
             id="table",
             columnDefs=[],  # Initialize with no columns
@@ -47,31 +63,30 @@ app.layout = html.Div(
             defaultColDef={"minWidth": 120, "sortable": True},
             dashGridOptions={"rowSelection": "single"},
         ),
-    ]
+    ],
+    className="dbc p-4",
 )
 
-
+#Still have to implement if the user want to change the date range, without changing the mast.
 @callback(
-    [Output("graph", "figure"), Output("table", "rowData"), Output("table", "columnDefs")],
-    [Input("mast", "value"), Input("parameter", "value")],
+    [Output("graph", "children"), Output("table", "rowData"), Output("table", "columnDefs")],
+    [Input("mast", "value"), Input("date-range-picker", "start_date"),Input("date-range-picker", "end_date")], 
 )
 
-def get_data_from_measurement(mast, parameter):
+def get_data_from_measurement(mast, start_date, end_date):
 
     print(f"Selected mast: {mast}")
-    print(f"Selected parameter: {parameter}")
+    print(f"Selected start date: {start_date}")
+    print(f"Selected end date: {end_date}")
 
-    start = "2023-01-01T00:00:00Z"
-    stop = "now()"
-  
-
-    position = mastopt.index(mast),
+    start = start_date
+    stop = end_date
     
-    dev_eui = codenamesformasts[position[0]]
+    #Based on selection of mast in app, the associated dev_eui is selected below
+    dev_eui = mast_dict[mast]
 
-    if parameter == "Ground Temperatures":
-            measurement_names = ["device_frmpayload_data_GroundTemp01",
-                                "device_frmpayload_data_GroundTemp02",
+    
+    measurement_names_gt = ["device_frmpayload_data_GroundTemp01",
                                 "device_frmpayload_data_GroundTemp03",
                                 "device_frmpayload_data_GroundTemp04",
                                 "device_frmpayload_data_GroundTemp05",
@@ -82,55 +97,65 @@ def get_data_from_measurement(mast, parameter):
                                 "device_frmpayload_data_GroundTemp10",
                                 "device_frmpayload_data_GroundTemp11",
                                 "device_frmpayload_data_GroundTemp12"]
-        
-    if parameter == "Weather Data":
   
-            measurement_names = ["device_frmpayload_data_RelHum",
-                                "device_frmpayload_data_AirTemp",
-                                "device_frmpayload_data_DewFrostPoint",
-                                "device_frmpayload_data_BarometricPressure",
-                                "device_frmpayload_data_AbsHum",
-                                "device_frmpayload_data_CloudBase",
-                                "device_frmpayload_data_Altitude"]
-            
-    if parameter == "Inclination Data":
+    #measurement_names_weather = ["device_frmpayload_data_RelHum",
+    #                            "device_frmpayload_data_AirTemp",
+    #                            "device_frmpayload_data_DewFrostPoint",
+    #                            "device_frmpayload_data_BarometricPressure",
+    #                            "device_frmpayload_data_AbsHum",
+    #                            "device_frmpayload_data_CloudBase",
+    #                            "device_frmpayload_data_Altitude"]
 
-            measurement_names = ["device_frmpayload_data_RollAngle",
-                            "device_frmpayload_data_PitchAngle",
-                            "device_frmpayload_data_CompassHeading"]
+    #measurement_names_incl =    ["device_frmpayload_data_RollAngle",
+    #                            "device_frmpayload_data_PitchAngle",
+    #                           "device_frmpayload_data_CompassHeading"]
     
-    timestamp_measurement = "device_frmpayload_data_Timestamp"
+    #timestamp_measurement = "device_frmpayload_data_Timestamp"
     bucket = "data_bucket"
 
-    df = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names, start, stop)
+    df_gt = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_gt, start, stop)
+    #df_incl = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_incl, start, stop)
+    #df_airtemp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[1], start, stop)
+    #df_rh = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[0], start, stop)
+    #df_bp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[3], start, stop)
     
-    df['value'] = pd.to_numeric(df['value'], errors='coerce')    
+    #df_gt['value'] = pd.to_numeric(df_gt['value'], errors='coerce')
+    #df_incl['value'] = pd.to_numeric(df_incl['value'], errors='coerce')
+    #df_airtemp['value'] = pd.to_numeric(df_airtemp['value'], errors='coerce')
+    #df_rh['value'] = pd.to_numeric(df_rh['value'], errors='coerce')
+    #df_bp['value'] = pd.to_numeric(df_bp['value'], errors='coerce')
 
-    if df.empty:
-        print("No data to plot.")
-        return
 
+    #if df_gt.empty:
+    #    print("No data to plot.")
+    #    return
 
-    # Create a Plotly Express figure
-    fig = px.line(
-        df,
-        x='time',
-        y='value',
-        color='measurement',
-        title=parameter,
-        labels={'value': 'Temperature (°C)', 'time': 'Time'}
-    )
+    payload_df = influx_test.get_data_from_measurement(bucket, dev_eui, "device_frmpayload_data_Payload", "device_frmpayload_data_Timestamp", start, stop)
+            
+    timeseries = influx_test.decode_payload(payload_df,start,stop)
 
-    fig.update_layout(
-        xaxis_title='Time',
-        yaxis_title='Temperature (°C)',
-        legend_title='Measurement',
-        template='plotly_white'  # Optional: change the template for aesthetics
-    )
+    # Create a Plotly Express figure, with all 5 subplots
+    fig = influx_test.all_graphs(timeseries,mast, start, stop)
+    
+    #fig1 = px.line(
+     #   df,
+      #  x='time',
+       # y='value',
+        #color='measurement',
+        #title=parameter,
+        #labels={'value': 'Temperature (°C)', 'time': 'Time'}
+    #)
+
+    #fig1.update_layout(
+     #   xaxis_title='Time',
+      #  yaxis_title='Temperature (°C)',
+       # legend_title='Measurement',
+       # template='plotly_white'  # Optional: change the template for aesthetics
+    #)
 
     # Prepare data for the table
-    row_data = df.to_dict("records")
-    column_defs = [{"field": i} for i in df.columns]
+    row_data = df_gt.to_dict("records")
+    column_defs = [{"field": i} for i in df_gt.columns]
 
     return fig, row_data, column_defs
     # Plot the measurements over time
@@ -165,6 +190,7 @@ def get_data_from_measurement(mast, parameter):
     # except Exception as e:
     #     print(f"Failed to get data from measurement: {e}")
     #     return []
+
 
 
 if __name__ == "__main__":
