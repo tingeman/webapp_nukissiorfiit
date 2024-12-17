@@ -87,7 +87,6 @@ def get_data_from_measurement(mast, start_date, end_date):
 
     
     measurement_names_gt = ["device_frmpayload_data_GroundTemp01",
-                                "device_frmpayload_data_GroundTemp02",
                                 "device_frmpayload_data_GroundTemp03",
                                 "device_frmpayload_data_GroundTemp04",
                                 "device_frmpayload_data_GroundTemp05",
@@ -99,41 +98,44 @@ def get_data_from_measurement(mast, start_date, end_date):
                                 "device_frmpayload_data_GroundTemp11",
                                 "device_frmpayload_data_GroundTemp12"]
   
-    measurement_names_weather = ["device_frmpayload_data_RelHum",
-                                "device_frmpayload_data_AirTemp",
-                                "device_frmpayload_data_DewFrostPoint",
-                                "device_frmpayload_data_BarometricPressure",
-                                "device_frmpayload_data_AbsHum",
-                                "device_frmpayload_data_CloudBase",
-                                "device_frmpayload_data_Altitude"]
+    #measurement_names_weather = ["device_frmpayload_data_RelHum",
+    #                            "device_frmpayload_data_AirTemp",
+    #                            "device_frmpayload_data_DewFrostPoint",
+    #                            "device_frmpayload_data_BarometricPressure",
+    #                            "device_frmpayload_data_AbsHum",
+    #                            "device_frmpayload_data_CloudBase",
+    #                            "device_frmpayload_data_Altitude"]
 
-    measurement_names_incl =    ["device_frmpayload_data_RollAngle",
-                                "device_frmpayload_data_PitchAngle",
-                                "device_frmpayload_data_CompassHeading"]
+    #measurement_names_incl =    ["device_frmpayload_data_RollAngle",
+    #                            "device_frmpayload_data_PitchAngle",
+    #                           "device_frmpayload_data_CompassHeading"]
     
-    timestamp_measurement = "device_frmpayload_data_Timestamp"
+    #timestamp_measurement = "device_frmpayload_data_Timestamp"
     bucket = "data_bucket"
 
     df_gt = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_gt, start, stop)
-    df_incl = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_incl, start, stop)
-    df_airtemp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[1], start, stop)
-    df_rh = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[0], start, stop)
-    df_bp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[3], start, stop)
+    #df_incl = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_incl, start, stop)
+    #df_airtemp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[1], start, stop)
+    #df_rh = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[0], start, stop)
+    #df_bp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[3], start, stop)
     
-    df_gt['value'] = pd.to_numeric(df_gt['value'], errors='coerce')
-    df_incl['value'] = pd.to_numeric(df_incl['value'], errors='coerce')
-    df_airtemp['value'] = pd.to_numeric(df_airtemp['value'], errors='coerce')
-    df_rh['value'] = pd.to_numeric(df_rh['value'], errors='coerce')
-    df_bp['value'] = pd.to_numeric(df_bp['value'], errors='coerce')
+    #df_gt['value'] = pd.to_numeric(df_gt['value'], errors='coerce')
+    #df_incl['value'] = pd.to_numeric(df_incl['value'], errors='coerce')
+    #df_airtemp['value'] = pd.to_numeric(df_airtemp['value'], errors='coerce')
+    #df_rh['value'] = pd.to_numeric(df_rh['value'], errors='coerce')
+    #df_bp['value'] = pd.to_numeric(df_bp['value'], errors='coerce')
 
 
-    if df_gt.empty:
-        print("No data to plot.")
-        return
+    #if df_gt.empty:
+    #    print("No data to plot.")
+    #    return
 
+    payload_df = influx_test.get_data_from_measurement(bucket, dev_eui, "device_frmpayload_data_Payload", "device_frmpayload_data_Timestamp", start, stop)
+            
+    timeseries = influx_test.decode_payload(payload_df,start,stop)
 
     # Create a Plotly Express figure, with all 5 subplots
-    fig = influx_test.all_graphs(df_gt, df_airtemp, df_rh, df_bp, df_incl,mast)
+    fig = influx_test.all_graphs(timeseries,mast, start, stop)
     
     #fig1 = px.line(
      #   df,
