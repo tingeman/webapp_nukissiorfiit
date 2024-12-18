@@ -18,8 +18,8 @@ RUN set -ex && \
 
 # Copy app files to image
 USER plotly
-WORKDIR /var/www/app
-COPY --chown=plotly:plotly ./app /var/www/app/
+WORKDIR /app
+COPY --chown=plotly:plotly ./app /app/
 
 # Set up entrypoint etc
 EXPOSE 8050
