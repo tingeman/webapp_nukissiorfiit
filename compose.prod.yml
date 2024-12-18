@@ -1,8 +1,8 @@
 services:
-  webapp_nuki:
+  webapp-nuki:
     build:
       dockerfile: Dockerfile
-    container_name: webapp_nuki
+    container_name: webapp-nuki
     ports:
       - 8052:8050
     stdin_open: true # docker run -i
