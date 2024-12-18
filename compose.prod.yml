@@ -2,6 +2,7 @@ services:
   webapp_nuki:
     build:
       dockerfile: Dockerfile
+    container_name: webapp_nuki
     ports:
       - 8052:8050
     stdin_open: true # docker run -i
@@ -9,6 +10,11 @@ services:
     environment:
       - APP_ENV=production
 
+
+networks:
+  default:
+    name: docker_default
+    external: true
 
 
 
