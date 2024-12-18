@@ -1,0 +1,26 @@
+services:
+  nginx:
+    build: 
+      context: ./nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: always
+    depends_on:
+      - webapp_nuki
+
+  webapp_nuki:
+    build:
+      dockerfile: Dockerfile
+    ports:
+      - 8050:8050
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    environment:
+      - APP_ENV=development
+
+
+# To (re)build images:       docker compose -f compose.develop.yml build
+# To run/start images:       docker compose -f compose.develop.yml up
+# To run/start images and leave running: docker compose -f compose.develop.yml up --detach     (or -d)
+# To enter specific image:   docker compose exec -ti webapp_qeqert02 /bin/bash
