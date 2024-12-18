@@ -1,14 +1,24 @@
+from flask import Flask
 from dash import Dash, Input, Output, callback, dcc, html
 import plotly.express as px
 import pandas as pd
 from influxdb_client import InfluxDBClient
 import dash_ag_grid as dag
 import ast
-import influx_test
 import dash_bootstrap_components as dbc
 import datetime
 from datetime import datetime as dt
 from dateutil.relativedelta import relativedelta
+
+import influx_test
+from config import settings
+DEBUG = settings.DEBUG
+#DEBUG = True
+
+# set up logging to console
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 mastopt = ["Mast 6", "Mast 7", "Mast 9", "Mast 12", "Mast 13"]
@@ -31,7 +41,13 @@ mast_dict = {'Mast 6': 'feedbeefcafe0002',
 end_date = datetime.date.today()
 start_date = end_date - relativedelta(months=1)
 
-app = Dash(__name__)
+
+server = Flask(__name__)
+app = Dash(__name__,                
+           server=server,
+           requests_pathname_prefix='/app/nuki/',
+           routes_pathname_prefix='/app/nuki/')
+
 
 app.layout = html.Div(
     [
@@ -75,9 +91,13 @@ app.layout = html.Div(
 
 def get_data_from_measurement(mast, start_date, end_date):
 
-    print(f"Selected mast: {mast}")
-    print(f"Selected start date: {start_date}")
-    print(f"Selected end date: {end_date}")
+    logger.debug(f"Selected mast: {mast}")
+    if mast is None:
+        mast = mastopt[0]
+
+    logger.debug(f"Selected mast: {mast}")
+    logger.debug(f"Selected start date: {start_date}")
+    logger.debug(f"Selected end date: {end_date}")
 
     start = start_date
     stop = end_date
@@ -112,7 +132,7 @@ def get_data_from_measurement(mast, start_date, end_date):
     
     #timestamp_measurement = "device_frmpayload_data_Timestamp"
     bucket = "data_bucket"
-
+                        
     df_gt = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_gt, start, stop)
     #df_incl = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_incl, start, stop)
     #df_airtemp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[1], start, stop)
@@ -127,7 +147,7 @@ def get_data_from_measurement(mast, start_date, end_date):
 
 
     #if df_gt.empty:
-    #    print("No data to plot.")
+    #    logger.debug("No data to plot.")
     #    return
 
     payload_df = influx_test.get_data_from_measurement(bucket, dev_eui, "device_frmpayload_data_Payload", "device_frmpayload_data_Timestamp", start, stop)
@@ -181,17 +201,18 @@ def get_data_from_measurement(mast, start_date, end_date):
 
 
     # except Exception as e:
-    #     print(f"Failed to plot measurements: {e}")
+    #     logger.debug(f"Failed to plot measurements: {e}")
         
     # except Exception as e:
-    #     print(f"Failed to get data from measurement: {e}")
+    #     logger.debug(f"Failed to get data from measurement: {e}")
     #     return pd.DataFrame()
 
     # except Exception as e:
-    #     print(f"Failed to get data from measurement: {e}")
+    #     logger.debug(f"Failed to get data from measurement: {e}")
     #     return []
 
 
 
 if __name__ == "__main__":
-    app.run()
+    #app.run()
+    app.run_server(debug=DEBUG)

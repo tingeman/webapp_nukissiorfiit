@@ -1,22 +1,31 @@
 from influxdb_client import InfluxDBClient
 import pandas as pd
 from matplotlib import pyplot as plt
-from config import settings
 import plotly.express as px
 import dash_bootstrap_components as dbc
 from dash import Dash, Input, Output, callback, dcc, html
 from collections import defaultdict
 import re
 import plotly.graph_objects as go
-import dash_core_components as dcc
 from datetime import datetime
 
+# set up logging to console
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Define your InfluxDB credentials
+from config import settings
+
 url = settings.influxdb_url
 token = settings.influxdb_token
 org = settings.influxdb_org
-DEBUG_MODE = settings.debug_mode
+DEBUG_MODE = settings.DEBUG
 
+# url = ""
+# token = ""
+# org = ""
+# DEBUG_MODE = True
 
 #Legend entries for ground temperatures:
 
@@ -54,7 +63,7 @@ def all_graphs(timeseries, mast, start, stop):
 
     # 1. Ground Temperatures Plot
     fig_gt = go.Figure()
-    #print(ground_temperatures.columns)
+    #logger.debug(ground_temperatures.columns)
     for column in ground_temperatures.columns:
             fig_gt.add_trace(go.Scatter(
                 x=ground_temperatures.index,  # X-axis (Timestamp)
@@ -160,12 +169,12 @@ def connect_to_influxdb(url, token, org):
         client = InfluxDBClient(url=url, token=token, org=org, timeout=60_000)
         health = client.health()
         if health.status == "pass":
-            print("Successfully connected to InfluxDB!")
+            logger.debug("Successfully connected to InfluxDB!")
         else:
-            print(f"Connection issue: {health.message}")
+            logger.debug(f"Connection issue: {health.message}")
         return client
     except Exception as e:
-        print(f"Failed to connect to InfluxDB: {e}")
+        logger.debug(f"Failed to connect to InfluxDB: {e}")
         return None
 
 def list_measurements(client, bucket):
@@ -176,7 +185,7 @@ def list_measurements(client, bucket):
         measurements = [record.get_value() for table in tables for record in table.records]
         return measurements
     except Exception as e:
-        print(f"Failed to list measurements: {e}")
+        logger.debug(f"Failed to list measurements: {e}")
         return []
     
 def list_tags(client, bucket, measurement):
@@ -187,13 +196,20 @@ def list_tags(client, bucket, measurement):
         tags = [record.get_value() for table in tables for record in table.records]
         return tags
     except Exception as e:
-        print(f"Failed to list tags: {e}")
+        logger.debug(f"Failed to list tags: {e}")
         return []
 
 
-def get_measurement_from_influxdb(bucket, dev_eui, measurements, timestamp_measurement, start, stop='now()'):    
-    client = connect_to_influxdb(url, token, org)
+#def get_measurement_from_influxdb(bucket, dev_eui, measurements, timestamp_measurement, start, stop='now()'):    
+def get_measurement_from_influxdb(bucket, dev_eui, measurements, start, stop='now()'):
     
+    logger.debug(f"Getting data from InfluxDB for device {dev_eui}...")
+    logger.debug(f"Start: {start}\n Stop: {stop}")
+
+    client = connect_to_influxdb(url, token, org)
+    if client is None:
+        logger.debug("Failed to connect to InfluxDB.")
+        logger.debug(f"url: {url}\n token: {token}\n org: {org}")
 
     query_api = client.query_api()
     
@@ -232,16 +248,16 @@ def get_measurement_from_influxdb(bucket, dev_eui, measurements, timestamp_measu
     '''
 
     if DEBUG_MODE:
-        print(f"Query:\n{query}")
+        logger.debug(f"Query:\n{query}")
 
     tables = query_api.query(query)
 
     if DEBUG_MODE:
-        print(f"Tables:\n{tables}")
+        logger.debug(f"Tables:\n{tables}")
         for table in tables:
-            print(f"Table:\n{table}")
+            logger.debug(f"Table:\n{table}")
         for record in tables[0].records:
-            print(f"Record:\n{record}")
+            logger.debug(f"Record:\n{record}")
 
     # data = [
     #     {
@@ -327,16 +343,16 @@ def get_data_from_measurement(bucket, dev_eui, measurements, timestamp_measureme
         '''
 
         if DEBUG_MODE:
-            print(f"Query:\n{query}")
+            logger.debug(f"Query:\n{query}")
 
         tables = query_api.query(query)
 
         if DEBUG_MODE:
-            print(f"Tables:\n{tables}")
+            logger.debug(f"Tables:\n{tables}")
             for table in tables:
-                print(f"Table:\n{table}")
+                logger.debug(f"Table:\n{table}")
             for record in tables[0].records:
-                print(f"Record:\n{record}")
+                logger.debug(f"Record:\n{record}")
 
         # data = [
         #     {
@@ -365,11 +381,11 @@ def get_data_from_measurement(bucket, dev_eui, measurements, timestamp_measureme
         
         return df
     except Exception as e:
-        print(f"Failed to get data from measurement: {e}")
+        logger.debug(f"Failed to get data from measurement: {e}")
         return pd.DataFrame()
 
     except Exception as e:
-        print(f"Failed to get data from measurement: {e}")
+        logger.debug(f"Failed to get data from measurement: {e}")
         return []
 
 def get_all_data_from_measurement(client, bucket, measurement, start):
@@ -382,7 +398,7 @@ def get_all_data_from_measurement(client, bucket, measurement, start):
         query_api = client.query_api()
         tables = query_api.query(query)
     except Exception as e:
-        print(f"Failed to get all data from measurement: {e}")
+        logger.debug(f"Failed to get all data from measurement: {e}")
         return pd.DataFrame()
 
     # Convert to Pandas DataFrame, retaining all columns
@@ -409,10 +425,10 @@ def get_last_message_of_type(df, message_type):
             last_message_row = message_df.loc[message_df['_time'].idxmax()]
             return last_message_row
         else:
-            print(f"No '{message_type}' messages found.")
+            logger.debug(f"No '{message_type}' messages found.")
             return None
     except Exception as e:
-        print(f"Failed to get last '{message_type}' message: {e}")
+        logger.debug(f"Failed to get last '{message_type}' message: {e}")
         return None
 
 def get_message_of_type_by_index(message_type, idx, start, stop='now()'):
@@ -462,16 +478,16 @@ def get_message_of_type_by_index(message_type, idx, start, stop='now()'):
             df = pd.DataFrame(data)
             return df
         else:
-            print(f"No messages found at timestamp: {timestamp}")
+            logger.debug(f"No messages found at timestamp: {timestamp}")
             return pd.DataFrame()
     except Exception as e:
-        print(f"Failed to get message by timestamp: {e}")
+        logger.debug(f"Failed to get message by timestamp: {e}")
         return pd.DataFrame()
 
 def plot_measurements(df):
     try:
         if df.empty:
-            print("No data to plot.")
+            logger.debug("No data to plot.")
             return
 
         # Plot the measurements over time
@@ -493,7 +509,7 @@ def plot_measurements(df):
         fig.savefig(f"influxdb_{df['dev_eui'].iloc[0]}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.png")
         plt.show(block=False)
     except Exception as e:
-        print(f"Failed to plot measurements: {e}")
+        logger.debug(f"Failed to plot measurements: {e}")
 
 def get_entries_by_timestamp(client, bucket, timestamp: str, dev_eui: str = None, device_name: str = None):
     if dev_eui:
@@ -510,7 +526,7 @@ def get_entries_by_timestamp(client, bucket, timestamp: str, dev_eui: str = None
     |> filter(fn: (r) => {device_filter})
     '''
     if DEBUG_MODE:
-        print(f"Query:\n{query}")
+        logger.debug(f"Query:\n{query}")
 
     try:
         query_api = client.query_api()
@@ -523,10 +539,10 @@ def get_entries_by_timestamp(client, bucket, timestamp: str, dev_eui: str = None
             df = pd.DataFrame(data)
             return df
         else:
-            print(f"No messages found at timestamp: {timestamp}")
+            logger.debug(f"No messages found at timestamp: {timestamp}")
             return pd.DataFrame()
     except Exception as e:
-        print(f"Failed to get message by timestamp: {e}")
+        logger.debug(f"Failed to get message by timestamp: {e}")
         return pd.DataFrame()
 
 def get_payload_timeseries(client, bucket, start_time, stop_time, device_name):
@@ -549,10 +565,10 @@ def get_payload_timeseries(client, bucket, start_time, stop_time, device_name):
             df = pd.DataFrame(data)
             return df
         else:
-            print(f"No data found for device '{device_name}' in the specified time range.")
+            logger.debug(f"No data found for device '{device_name}' in the specified time range.")
             return pd.DataFrame()
     except Exception as e:
-        print(f"Failed to retrieve payload timeseries: {e}")
+        logger.debug(f"Failed to retrieve payload timeseries: {e}")
         return pd.DataFrame()
 
 # Code to decode payload instead of the measurements as saved in InfluxDB
@@ -577,7 +593,7 @@ def extract_data_values_ps(data_sum, count):
     values_match = re_PS_data_values.search(data_sum)
     if values_match:
         values_str = values_match.group("values")
-        #print(f"Extracted values: {values_str}")
+        #logger.debug(f"Extracted values: {values_str}")
         return list(map(float, values_str.split()[:count]))
     return []
 
@@ -585,7 +601,7 @@ def extract_data_values_pb(data_sum):
     battery_match = re_PB_battery_level.search(data_sum)
     if battery_match:
         battery_level = battery_match.group("battery")
-        #print(f"Extracted battery level: {battery_level}")
+        #logger.debug(f"Extracted battery level: {battery_level}")
         return float(battery_level)
     return None
 
@@ -600,24 +616,24 @@ def decode_payload(payloads_df, start, stop):
     payloads = payloads_df._value
     
     for data_sum in payloads:
-        #print(f"Processing payload: {data_sum}")
+        #logger.debug(f"Processing payload: {data_sum}")
         
         # Extract the message type
         message_type_match = re_message_type.match(data_sum)
         if message_type_match:
             message_type = message_type_match.group("msgtype")
-            #print(f"Message type: {message_type}")
+            #logger.debug(f"Message type: {message_type}")
         else:
-            print("No message type found.")
+            logger.debug("No message type found.")
             continue
         
         # Extract and format timestamp
         timestamp_match = re_timestamp.search(data_sum)
         if timestamp_match:
             timestamp = f"20{timestamp_match.group('year')}-{timestamp_match.group('month')}-{timestamp_match.group('day')} {timestamp_match.group('hour')}:{timestamp_match.group('min')}:{timestamp_match.group('sec')}"
-            #print(f"Timestamp: {timestamp}")
+            #logger.debug(f"Timestamp: {timestamp}")
         else:
-            print("No timestamp found.")
+            logger.debug("No timestamp found.")
             continue
 
         # Extract Sensor ID and SubSensor ID
@@ -627,9 +643,9 @@ def decode_payload(payloads_df, start, stop):
         if sensor_id_match and subsensor_id_match:
             sensor_id = int(sensor_id_match.group("sensor"))
             subsensor_id = int(subsensor_id_match.group("subsensor"))
-            #print(f"Sensor ID: {sensor_id}, SubSensor ID: {subsensor_id}")
+            #logger.debug(f"Sensor ID: {sensor_id}, SubSensor ID: {subsensor_id}")
         #else:
-            #print("No sensor or subsensor ID found.")
+            #logger.debug("No sensor or subsensor ID found.")
             
 
         # Decode based on sensor type and message type
@@ -662,11 +678,11 @@ def decode_payload(payloads_df, start, stop):
                     weather_data["CloudBase"].append((timestamp, values[1]))
                     weather_data["Altitude"].append((timestamp, values[2]))
         
-        #print(message_type == "PB")
+        #logger.debug(message_type == "PB")
 
         if message_type == "PB":
             battery_level = extract_data_values_pb(data_sum)
-            #print(battery_level)
+            #logger.debug(battery_level)
             if battery_level is not None:
                 battery_levels["Battery"].append((timestamp, battery_level))
         
@@ -693,9 +709,9 @@ def decode_payload(payloads_df, start, stop):
         df["Timestamp"] = pd.to_datetime(df["Timestamp"])
         #Filter based on start and stop. Necessary as payloads sent between start and stop often contain payloads from earlier on
         df_filtered = df[(df["Timestamp"] >= start) & (df["Timestamp"] <= stop)]
-        #print(df_filtered)
+        #logger.debug(df_filtered)
         return df_filtered.set_index("Timestamp")
-    #print(ground_temperatures)
+    #logger.debug(ground_temperatures)
     # Process each data dictionary and convert to DataFrame with Timestamp index
     data_dict = {
         "Ground Temperatures": process_data(ground_temperatures),
@@ -704,7 +720,7 @@ def decode_payload(payloads_df, start, stop):
         "Battery Levels": process_data(battery_levels)
     }
     #gt_test = data_dict["Ground Temperatures"]
-    #print(gt_test.index.dtype)
+    #logger.debug(gt_test.index.dtype)
     return data_dict
 
 if __name__ == "__main__":
@@ -714,16 +730,16 @@ if __name__ == "__main__":
 
         # Example: Retrieve (names of) all measurements in the bucket
         measurements = list_measurements(client, bucket)
-        print("Measurements in the bucket:")
+        logger.debug("Measurements in the bucket:")
         for measurement in measurements:
-            print(measurement)
+            logger.debug(measurement)
         
         # Example: Retrieve all tags for a specific measurement
         measurement_name = "device_frmpayload_data_GroundTemp01"
         tags = list_tags(client, bucket, measurement_name)
-        print(f"Tags for measurement '{measurement_name}':")
+        logger.debug(f"Tags for measurement '{measurement_name}':")
         for tag in tags:
-            print(tag)
+            logger.debug(tag)
 
         if False:
             # Example: Retrieve all data from a specific measurement within a given time range
@@ -743,10 +759,10 @@ if __name__ == "__main__":
             start_time = "2024-10-01T00:00:00Z"
             stop_time = "now()"
             df = get_data_from_measurement(client, bucket, measurement_names, timestamp_measurement, start_time, stop_time)
-            print(f"Data retreived:")
+            logger.debug(f"Data retreived:")
             # for entry in data:
-            #     print(entry)
-            print(df)
+            #     logger.debug(entry)
+            logger.debug(df)
             
             plot_measurements(df)
 
@@ -755,15 +771,15 @@ if __name__ == "__main__":
             measurement_name = "device_frmpayload_data_Timestamp"
             start_time = "2023-01-01T00:00:00Z"
             timestamp_df = get_all_data_from_measurement(client, bucket, measurement_name, start_time)
-            print(f"All data from measurement '{measurement_name}':")
-            print(timestamp_df)
+            logger.debug(f"All data from measurement '{measurement_name}':")
+            logger.debug(timestamp_df)
 
             # Retrieve all payload MassageType entries in data_bucket
             measurement_name = "device_frmpayload_data_MessageType"
             start_time = "2023-01-01T00:00:00Z"
             mt_df = get_all_data_from_measurement(client, bucket, measurement_name, start_time)
-            print(f"All data from measurement '{measurement_name}':")
-            print(mt_df)
+            logger.debug(f"All data from measurement '{measurement_name}':")
+            logger.debug(mt_df)
 
         if False:
             # Retrieve all payload timestamps in data_bucket
@@ -778,7 +794,7 @@ if __name__ == "__main__":
 
         if False:
             # Plot all payload MessageType entries in data_bucket as function of payload timestamp
-            print("Retrieving data from InfluxDB... Finding specific 'PS' message by index...")
+            logger.debug("Retrieving data from InfluxDB... Finding specific 'PS' message by index...")
             # Retrieve all payload MessageType entries in data_bucket
             measurement_name = "device_frmpayload_data_MessageType"
             start_time = "2023-01-01T00:00:00Z"
@@ -807,7 +823,7 @@ if __name__ == "__main__":
             plt.show(block=False)
 
         if False:
-            print("Retrieving data from InfluxDB... Finding specific 'PS' message by index...")
+            logger.debug("Retrieving data from InfluxDB... Finding specific 'PS' message by index...")
             # Retrieve all payload MessageType entries in data_bucket
             device_name = "Tekbox_TBLS1_3"
             start_time = "2023-01-01T00:00:00Z"
@@ -820,14 +836,14 @@ if __name__ == "__main__":
             start_time = "2023-01-01T00:00:00Z"
             pl_df = get_all_data_from_measurement(client, bucket, measurement_name, start_time)
             with pd.option_context('display.max_rows', None):
-                print(pl_df[pl_df['device_name']=='Tekbox_TBLS1_5'][['_time', '_value', 'device_name']])
+                logger.debug(pl_df[pl_df['device_name']=='Tekbox_TBLS1_5'][['_time', '_value', 'device_name']])
 
             # Retrieve a timeseries of the measurement "device_frmpayload_data_Payload"
             start_time = "2023-01-01T00:00:00Z"
             stop_time = "now()"
             device_name = "Tekbox_TBLS1_5"
             payload_df = get_payload_timeseries(client, bucket, start_time, stop_time, device_name)
-            print(f"Payload timeseries for device '{device_name}':")
-            print(payload_df)
+            logger.debug(f"Payload timeseries for device '{device_name}':")
+            logger.debug(payload_df)
 
         client.close()
