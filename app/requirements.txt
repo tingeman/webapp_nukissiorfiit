@@ -1,3 +1,18 @@
-influxdb-client
 pandas
 matplotlib
+matplotlib-inline
+pydantic
+pydantic-settings
+python-dotenv
+plotly
+dash
+dash-bootstrap-components
+dash-ag-grid
+influxdb-client
+Flask
+Werkzeug
+gunicorn
+
+# for development
+ipython
+ipdb

@@ -1,9 +1,0 @@
-influxdb-client
-pandas
-matplotlib
-pydantic
-python-dotenv
-dash
-plotly
-dash-ag-grid
-

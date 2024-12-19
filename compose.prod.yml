@@ -1,0 +1,24 @@
+services:
+  webapp-nuki:
+    build:
+      dockerfile: Dockerfile
+    container_name: webapp-nuki
+    ports:
+      - 8052:8050
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    environment:
+      - APP_ENV=production
+
+
+networks:
+  default:
+    name: docker_default
+    external: true
+
+
+
+# To (re)build images:       docker compose -f compose.yml build
+# To run/start images:       docker compose -f compose.yml up
+# To run/start images and leave running: docker compose -f compose.yml up --detach     (or -d)
+# To enter specific image:   docker compose exec -ti webapp_qeqert02 /bin/bash
