@@ -9,11 +9,6 @@ import re
 import plotly.graph_objects as go
 from datetime import datetime
 
-# set up logging to console
-import logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # Define your InfluxDB credentials
 from config import settings
 
@@ -21,6 +16,14 @@ url = settings.influxdb_url
 token = settings.influxdb_token
 org = settings.influxdb_org
 DEBUG_MODE = settings.DEBUG
+
+# set up logging to console
+import logging
+if settings.DEBUG:
+    logging.basicConfig(level=logging.DEBUG, force=True)
+else:
+    logging.basicConfig(level=logging.INFO, force=True)
+logger = logging.getLogger(__name__)
 
 # url = ""
 # token = ""

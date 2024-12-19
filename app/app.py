@@ -17,9 +17,13 @@ DEBUG = settings.DEBUG
 
 # set up logging to console
 import logging
-logging.basicConfig(level=logging.INFO)
+if DEBUG:
+    logging.basicConfig(level=logging.DEBUG, force=True)
+else:
+    logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
+logger.info("app.py loaded")
 
 mastopt = ["Mast 6", "Mast 7", "Mast 9", "Mast 12", "Mast 13"]
 
@@ -90,8 +94,8 @@ app.layout = html.Div(
 )
 
 def get_data_from_measurement(mast, start_date, end_date):
-
-    logger.debug(f"Selected mast: {mast}")
+    logger.info(f"Selected mast: {mast} (info)")
+    logger.debug(f"Selected mast: {mast} (debug)")
     if mast is None:
         mast = mastopt[0]
 
