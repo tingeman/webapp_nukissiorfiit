@@ -30,18 +30,18 @@ def load_environment():
 
     logger.debug(f"Loading environment from {env_file} file...")
     
-    if not (module_path / env_file).exists():
+    if not (module_path / 'secrets' / env_file).exists():
         if (module_path / ".env.example").exists():
             logger.warning(f"No {env_file} file found. Creating one from .env.example...")
             with open(module_path / ".env.example") as f:
                 example_content = f.read()
-            with open(module_path / env_file, 'w') as f:
+            with open(module_path / 'secrets' / env_file, 'w') as f:
                 f.write(example_content)
             logger.warning(f"Please update the {env_file} file with your configuration.")
         else:
             raise FileNotFoundError(f"No {env_file} or .env.example file found. Please create one.")
 
-    load_dotenv(module_path / env_file, override=True)
+    load_dotenv(module_path / 'secrets' / env_file, override=True)
 
 load_environment()
 settings = ConfigSettings()

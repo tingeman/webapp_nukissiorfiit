@@ -1,0 +1,22 @@
+{
+    "name": "Webapp_nukissiorfiit Django Dev Container",
+    "dockerComposeFile": "compose.devcon.yml",
+    "service": "webapp_nuki_devcon",
+    "workspaceFolder": "/app",
+    "mounts": [
+        "source=${localWorkspaceFolder}/app,target=/app,type=bind",
+        "source=${localWorkspaceFolder},target=/workspace,type=bind"
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/bin/python"
+            },
+            "extensions": [
+                "ms-python.python",
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    },
+    "postCreateCommand": "bash /workspace/.devcontainer/postCreateCommand.sh"
+}

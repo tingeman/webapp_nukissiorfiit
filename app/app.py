@@ -9,6 +9,9 @@ import dash_bootstrap_components as dbc
 import datetime
 from datetime import datetime as dt
 from dateutil.relativedelta import relativedelta
+import plotly.graph_objects as go
+
+import db_connector
 
 import influx_test
 from config import settings
@@ -109,112 +112,145 @@ def get_data_from_measurement(mast, start_date, end_date):
     #Based on selection of mast in app, the associated dev_eui is selected below
     dev_eui = mast_dict[mast]
 
-    
-    measurement_names_gt = ["device_frmpayload_data_GroundTemp01",
-                                "device_frmpayload_data_GroundTemp03",
-                                "device_frmpayload_data_GroundTemp04",
-                                "device_frmpayload_data_GroundTemp05",
-                                "device_frmpayload_data_GroundTemp06",
-                                "device_frmpayload_data_GroundTemp07",
-                                "device_frmpayload_data_GroundTemp08",
-                                "device_frmpayload_data_GroundTemp09",
-                                "device_frmpayload_data_GroundTemp10",
-                                "device_frmpayload_data_GroundTemp11",
-                                "device_frmpayload_data_GroundTemp12"]
-  
-    #measurement_names_weather = ["device_frmpayload_data_RelHum",
-    #                            "device_frmpayload_data_AirTemp",
-    #                            "device_frmpayload_data_DewFrostPoint",
-    #                            "device_frmpayload_data_BarometricPressure",
-    #                            "device_frmpayload_data_AbsHum",
-    #                            "device_frmpayload_data_CloudBase",
-    #                            "device_frmpayload_data_Altitude"]
+    df_gt, sensor_depth_dict, gt_dt_obj = db_connector.get_ground_temp(dev_eui, start, stop)
+    df_weather = db_connector.get_sensor_data(dev_eui, "Weather Sensor", start, stop)
+    df_incl = db_connector.get_sensor_data(dev_eui, "Inclination Sensor", start, stop)
 
-    #measurement_names_incl =    ["device_frmpayload_data_RollAngle",
-    #                            "device_frmpayload_data_PitchAngle",
-    #                           "device_frmpayload_data_CompassHeading"]
-    
-    #timestamp_measurement = "device_frmpayload_data_Timestamp"
-    bucket = "data_bucket"
-                        
-    df_gt = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_gt, start, stop)
-    #df_incl = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_incl, start, stop)
-    #df_airtemp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[1], start, stop)
-    #df_rh = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[0], start, stop)
-    #df_bp = influx_test.get_measurement_from_influxdb(bucket, dev_eui, measurement_names_weather[3], start, stop)
-    
-    #df_gt['value'] = pd.to_numeric(df_gt['value'], errors='coerce')
-    #df_incl['value'] = pd.to_numeric(df_incl['value'], errors='coerce')
-    #df_airtemp['value'] = pd.to_numeric(df_airtemp['value'], errors='coerce')
-    #df_rh['value'] = pd.to_numeric(df_rh['value'], errors='coerce')
-    #df_bp['value'] = pd.to_numeric(df_bp['value'], errors='coerce')
+    fig_gt = plot_ground_temp(df_gt, sensor_depth_dict, gt_dt_obj, mast)
+    fig_airtemp = plot_airtemp(df_weather[['AirTemp']], mast)   # duble brackets to keep it as a dataframe
+    fig_rh = plot_rh(df_weather[['RelHum']], mast)              # duble brackets to keep it as a dataframe
+    fig_bp = plot_pressure(df_weather[['BarometricPressure']], mast)  # duble brackets to keep it as a dataframe
+    fig_incl = plot_inclination(df_incl, mast)  
 
+    graph1 = dcc.Graph(figure=fig_gt, className="border")
+    graph2 = dcc.Graph(figure=fig_airtemp, className="border")
+    graph3 = dcc.Graph(figure=fig_rh, className="border")
+    graph4 = dcc.Graph(figure=fig_bp, className="border")
+    graph5 = dcc.Graph(figure=fig_incl, className="border")
 
-    #if df_gt.empty:
-    #    logger.debug("No data to plot.")
-    #    return
-
-    payload_df = influx_test.get_data_from_measurement(bucket, dev_eui, "device_frmpayload_data_Payload", "device_frmpayload_data_Timestamp", start, stop)
-            
-    timeseries = influx_test.decode_payload(payload_df,start,stop)
-
-    # Create a Plotly Express figure, with all 5 subplots
-    fig = influx_test.all_graphs(timeseries,mast, start, stop)
-    
-    #fig1 = px.line(
-     #   df,
-      #  x='time',
-       # y='value',
-        #color='measurement',
-        #title=parameter,
-        #labels={'value': 'Temperature (°C)', 'time': 'Time'}
-    #)
-
-    #fig1.update_layout(
-     #   xaxis_title='Time',
-      #  yaxis_title='Temperature (°C)',
-       # legend_title='Measurement',
-       # template='plotly_white'  # Optional: change the template for aesthetics
-    #)
+    all_graphs = [
+        dbc.Row([dbc.Col(graph1, lg=6), dbc.Col(graph2, lg=6)]),
+        dbc.Row([dbc.Col(graph3, lg=6), dbc.Col(graph4, lg=6)]),
+        dbc.Row([dbc.Col(graph5, lg=6)], className="mt-4"),
+    ]
 
     # Prepare data for the table
     row_data = df_gt.to_dict("records")
     column_defs = [{"field": i} for i in df_gt.columns]
 
-    return fig, row_data, column_defs
-    # Plot the measurements over time
-    #fig, ax = plt.subplots(figsize=(12, 6))
+    return all_graphs, row_data, column_defs
+ 
 
-    # Get unique measurements to plot each with a different color
-    #unique_measurements = df['measurement'].unique()
-    #for measurement in unique_measurements:
-        #subset = df[df['measurement'] == measurement]
-        #ax.plot(subset['time'], subset['value'], label=measurement)
+def plot_ground_temp(df, sensor_depth_dict, datatype_obj, mast):
+    fig_gt = go.Figure()
+    #logger.debug(ground_temperatures.columns)
+    for column in df.columns:
+            fig_gt.add_trace(go.Scatter(
+                x=df.index,  # X-axis (Timestamp)
+                y=df[column],  # Y-axis (Temperature values)
+                mode='lines+markers',  # Lines and markers
+                name=f"{sensor_depth_dict[column]:+0.2f} m",  # Label for each line (Depth sensor)
+                marker=dict(size=6)  # Marker customization
+            ))
 
-    #ax.set_xlabel('Time')
-    #ax.set_ylabel('Temperature (°C)')
-    #ax.set_title('Measurements Over Time')
-    #ax.legend()
-    #ax.grid(True)
-    #fig.tight_layout()
-    # save figure to a file. The filename will be influxdb_<dev_eui>_<timestamp>.png
-    #fig.savefig(f"influxdb_{df['dev_eui'].iloc[0]}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.png")
-    #plt.show(block=False)
-    #return fig
+    # Function should be updated to obtain this information
+    # dynamically from the database...
+    fig_gt.update_layout(
+            title=f"Ground Temperature - {mast}",
+            xaxis_title='Time',
+            yaxis_title='Temperature (°C)',
+            legend_title='Sensor Depth',
+            template='plotly_white'
+        )
+
+    return fig_gt
+
+# These plotting functions could be generalized to accept a list of columns
+# and a list of names to be used as labels for each column
+# This would significantly reduce the amount of code needed to plot
+
+def plot_airtemp(df, mast):
+    fig_airtemp = go.Figure()
+
+    fig_airtemp.add_trace(go.Scatter(
+                x=df.index,  # X-axis (Timestamp)
+                y=df["AirTemp"],  # Y-axis (Temperature values)
+                mode='lines+markers',  # Lines and markers
+                name="Air Temperature", 
+                marker=dict(size=6)  # Marker customization
+            ))
+
+    fig_airtemp.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Air Temperature (°C)',
+        showlegend=False,
+        template='plotly_white'
+    )
+
+    return fig_airtemp
+
+def plot_rh(df, mast):
+    fig_rh = go.Figure()
+
+    fig_rh.add_trace(go.Scatter(
+            x=df.index,  # X-axis (Timestamp)
+            y=df["RelHum"],  # Y-axis 
+            mode='lines+markers',  # Lines and markers
+            name="Relative Humidity",  # Label for each line (Depth sensor)
+            marker=dict(size=6)  # Marker customization
+        ))
+
+    fig_rh.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Relative Humidity (%)',
+        showlegend=False,
+        template='plotly_white'
+    )
+
+    return fig_rh
 
 
+def plot_pressure(df, mast):
+    fig_bp = go.Figure()
 
-    # except Exception as e:
-    #     logger.debug(f"Failed to plot measurements: {e}")
-        
-    # except Exception as e:
-    #     logger.debug(f"Failed to get data from measurement: {e}")
-    #     return pd.DataFrame()
+    fig_bp.add_trace(go.Scatter(
+                x=df.index,  # X-axis (Timestamp)
+                y=df["BarometricPressure"],  # Y-axis (Temperature values)
+                mode='lines+markers',  # Lines and markers
+                name="Barometric Pressure",  # Label for each line (Depth sensor)
+                marker=dict(size=6)  # Marker customization
+            ))
+    
+    fig_bp.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Barometric Pressure (kPa)',
+        showlegend=False,
+        template='plotly_white'
+    )
 
-    # except Exception as e:
-    #     logger.debug(f"Failed to get data from measurement: {e}")
-    #     return []
+    return fig_bp
 
+def plot_inclination(df, mast):
+
+    fig_incl = go.Figure()
+    
+    for column in df.columns:
+        fig_incl.add_trace(go.Scatter(
+            x=df.index,  # X-axis (Timestamp)
+            y=df[column],  # Y-axis (Temperature values)
+            mode='lines+markers',  # Lines and markers
+            name=column,  # Label for each line (Depth sensor)
+            marker=dict(size=6)  # Marker customization
+        ))
+
+    fig_incl.update_layout(
+        xaxis_title='Time',
+        yaxis_title='Inclination (deg)',
+        legend_title='Measurement',
+        template='plotly_white'
+    )
+
+    return fig_incl
 
 
 if __name__ == "__main__":

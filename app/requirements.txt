@@ -1,18 +1,23 @@
+django[gis]==4.2
+django-extensions
+django-timescaledb
+psycopg[binary]
+python-dotenv
+pydantic
+pydantic-settings
+setuptools
 pandas
 matplotlib
 matplotlib-inline
-pydantic
-pydantic-settings
-python-dotenv
 plotly
 dash
 dash-bootstrap-components
 dash-ag-grid
 influxdb-client
 Flask
-Werkzeug
+werkzeug
 gunicorn
 
-# for development
+# while testing
 ipython
 ipdb

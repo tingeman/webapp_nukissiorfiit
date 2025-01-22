@@ -2,25 +2,28 @@
 # docker compose -f compose.develop.yml up -d
 
 services:
-  nginx:
-    build: 
-      context: ./nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    restart: always
-    depends_on:
-      - webapp_nuki
+  # nginx:
+  #   build: 
+  #     context: ./nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   restart: always
+  #   depends_on:
+  #     - webapp_nuki
 
-  webapp_nuki:
+  webapp_nuki_devcon:
+    container_name: webapp-nuki-devcon
     build:
+      context: ..
       dockerfile: Dockerfile
     # volumes:
     #   - ./secrets:/app/secrets
     ports:
-      - 8050:8050
+      - 8040:8040
     stdin_open: true # docker run -i
     tty: true        # docker run -t
+    #command: bash -c 'cd /app && python app.py'
     environment:
       - APP_ENV=development
 
