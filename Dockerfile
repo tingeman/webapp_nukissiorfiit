@@ -59,5 +59,5 @@ COPY --chown=plotly:plotly ./app /app/
 
 # Set up entrypoint etc
 EXPOSE 8050
-#CMD ["gunicorn", "-b", "0.0.0.0:8050", "--workers", "4", "--timeout", "120", "--reload", "app:server"]
-CMD ["/bin/bash"]
+CMD ["gunicorn", "-b", "0.0.0.0:8050", "--workers", "4", "--timeout", "120", "--reload", "app:server"]
+#CMD ["/bin/bash"]

@@ -23,7 +23,8 @@ services:
       - 8040:8040
     stdin_open: true # docker run -i
     tty: true        # docker run -t
-    #command: bash -c 'cd /app && python app.py'
+    # override command with /bin/bash to keep container running without launching gunicorn
+    command: /bin/bash
     environment:
       - APP_ENV=development
 
