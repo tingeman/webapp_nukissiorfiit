@@ -97,6 +97,8 @@ app.layout = html.Div(
 )
 
 def get_data_from_measurement(mast, start_date, end_date):
+    """Get data from the database and plot it"""
+    
     logger.info(f"Selected mast: {mast} (info)")
     logger.debug(f"Selected mast: {mast} (debug)")
     if mast is None:
@@ -116,11 +118,11 @@ def get_data_from_measurement(mast, start_date, end_date):
     df_weather = db_connector.get_sensor_data(dev_eui, "Weather Sensor", start, stop)
     df_incl = db_connector.get_sensor_data(dev_eui, "Inclination Sensor", start, stop)
 
-    fig_gt = plot_ground_temp(df_gt, sensor_depth_dict, gt_dt_obj, mast)
-    fig_airtemp = plot_airtemp(df_weather[['AirTemp']], mast)   # duble brackets to keep it as a dataframe
-    fig_rh = plot_rh(df_weather[['RelHum']], mast)              # duble brackets to keep it as a dataframe
-    fig_bp = plot_pressure(df_weather[['BarometricPressure']], mast)  # duble brackets to keep it as a dataframe
-    fig_incl = plot_inclination(df_incl, mast)  
+    fig_gt = plot_measures(df_gt, ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}", label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")   
+    fig_airtemp = plot_measures(df_weather[['AirTemp']], ylabel="Temperature (°C)", title=f"Air Temperature - {mast}", label_names=["Air Temperature"], legend_title="Measurement")
+    fig_rh = plot_measures(df_weather[['RelHum']], ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}", label_names=["Relative Humidity"], legend_title="Measurement")
+    fig_bp = plot_measures(df_weather[['BarometricPressure']], ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}", label_names=["Barometric Pressure"], legend_title="Measurement")
+    fig_incl = plot_measures(df_incl, ylabel="Inclination (deg)", title=f"Inclination - {mast}", legend_title="Measurement")
 
     graph1 = dcc.Graph(figure=fig_gt, className="border")
     graph2 = dcc.Graph(figure=fig_airtemp, className="border")
@@ -141,116 +143,38 @@ def get_data_from_measurement(mast, start_date, end_date):
     return all_graphs, row_data, column_defs
  
 
-def plot_ground_temp(df, sensor_depth_dict, datatype_obj, mast):
-    fig_gt = go.Figure()
-    #logger.debug(ground_temperatures.columns)
-    for column in df.columns:
-            fig_gt.add_trace(go.Scatter(
-                x=df.index,  # X-axis (Timestamp)
-                y=df[column],  # Y-axis (Temperature values)
-                mode='lines+markers',  # Lines and markers
-                name=f"{sensor_depth_dict[column]:+0.2f} m",  # Label for each line (Depth sensor)
-                marker=dict(size=6)  # Marker customization
-            ))
-
-    # Function should be updated to obtain this information
-    # dynamically from the database...
-    fig_gt.update_layout(
-            title=f"Ground Temperature - {mast}",
-            xaxis_title='Time',
-            yaxis_title='Temperature (°C)',
-            legend_title='Sensor Depth',
-            template='plotly_white'
-        )
-
-    return fig_gt
-
-# These plotting functions could be generalized to accept a list of columns
-# and a list of names to be used as labels for each column
-# This would significantly reduce the amount of code needed to plot
-
-def plot_airtemp(df, mast):
-    fig_airtemp = go.Figure()
-
-    fig_airtemp.add_trace(go.Scatter(
-                x=df.index,  # X-axis (Timestamp)
-                y=df["AirTemp"],  # Y-axis (Temperature values)
-                mode='lines+markers',  # Lines and markers
-                name="Air Temperature", 
-                marker=dict(size=6)  # Marker customization
-            ))
-
-    fig_airtemp.update_layout(
-        xaxis_title='Time',
-        yaxis_title='Air Temperature (°C)',
-        showlegend=False,
-        template='plotly_white'
-    )
-
-    return fig_airtemp
-
-def plot_rh(df, mast):
-    fig_rh = go.Figure()
-
-    fig_rh.add_trace(go.Scatter(
-            x=df.index,  # X-axis (Timestamp)
-            y=df["RelHum"],  # Y-axis 
-            mode='lines+markers',  # Lines and markers
-            name="Relative Humidity",  # Label for each line (Depth sensor)
-            marker=dict(size=6)  # Marker customization
-        ))
-
-    fig_rh.update_layout(
-        xaxis_title='Time',
-        yaxis_title='Relative Humidity (%)',
-        showlegend=False,
-        template='plotly_white'
-    )
-
-    return fig_rh
-
-
-def plot_pressure(df, mast):
-    fig_bp = go.Figure()
-
-    fig_bp.add_trace(go.Scatter(
-                x=df.index,  # X-axis (Timestamp)
-                y=df["BarometricPressure"],  # Y-axis (Temperature values)
-                mode='lines+markers',  # Lines and markers
-                name="Barometric Pressure",  # Label for each line (Depth sensor)
-                marker=dict(size=6)  # Marker customization
-            ))
+def plot_measures(df, ylabel="", title="", label_names=None, legend_title=""):
+    """General plotting function
+    Takes a dataframe and plots each column as a line on the same graph
+    """
     
-    fig_bp.update_layout(
-        xaxis_title='Time',
-        yaxis_title='Barometric Pressure (kPa)',
-        showlegend=False,
-        template='plotly_white'
-    )
+    fig = go.Figure()
 
-    return fig_bp
+    for id, column in enumerate(df.columns):
 
-def plot_inclination(df, mast):
+        if label_names is not None:
+            label = label_names[id]
+        else:
+            label = column
 
-    fig_incl = go.Figure()
-    
-    for column in df.columns:
-        fig_incl.add_trace(go.Scatter(
+        fig.add_trace(go.Scatter(
             x=df.index,  # X-axis (Timestamp)
             y=df[column],  # Y-axis (Temperature values)
             mode='lines+markers',  # Lines and markers
-            name=column,  # Label for each line (Depth sensor)
+            name=label,  # Label for each line (Depth sensor)
             marker=dict(size=6)  # Marker customization
         ))
 
-    fig_incl.update_layout(
+    fig.update_layout(
+        title=title,
         xaxis_title='Time',
-        yaxis_title='Inclination (deg)',
-        legend_title='Measurement',
+        yaxis_title=ylabel,
+        legend_title=legend_title,
         template='plotly_white'
     )
 
-    return fig_incl
+    return fig
+
 
 
 if __name__ == "__main__":
