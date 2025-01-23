@@ -45,6 +45,13 @@ RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
 RUN usermod -aG sudo plotly \
     && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
+# Create project directories and set permissions
+RUN mkdir -p /app /app/logs /app/secrets \
+    && chown $USER_UID:$USER_GID /app /app/logs /app/secrets \
+    && chmod -R 755 /app /app/logs \
+    && chmod -R 511 /app/secrets
+# The secrets folder must have 511 permissions to allow dockeruser to access the files
+
 # Install required python packages
 COPY  ./app/requirements.txt ./requirements.txt
 RUN set -ex && \
