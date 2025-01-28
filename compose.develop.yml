@@ -15,6 +15,7 @@ services:
   webapp_nuki:
     build:
       dockerfile: Dockerfile
+    container_name: webapp-nuki
     # volumes:
     #   - ./secrets:/app/secrets
     ports:

@@ -17,6 +17,7 @@ influxdb-client
 Flask
 werkzeug
 gunicorn
+kaleido
 
 # while testing
 ipython
