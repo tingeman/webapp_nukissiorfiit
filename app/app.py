@@ -1,4 +1,5 @@
-from flask import Flask
+from flask import Flask, request
+
 from dash import Dash, Input, Output, callback, dcc, html
 import plotly.express as px
 import pandas as pd
@@ -99,14 +100,13 @@ app.layout = html.Div(
 def get_data_from_measurement(mast, start_date, end_date):
     """Get data from the database and plot it"""
     
-    logger.info(f"Selected mast: {mast} (info)")
-    logger.debug(f"Selected mast: {mast} (debug)")
+    # How do I get the IP address of the client sending the request?
+    client_ip = request.remote_addr
+    request_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    logger.debug(f"{request_time} - {client_ip} - Requesting # Mast: {mast}; Start Date: {start_date}; End Date: {end_date}")
+
     if mast is None:
         mast = mastopt[0]
-
-    logger.debug(f"Selected mast: {mast}")
-    logger.debug(f"Selected start date: {start_date}")
-    logger.debug(f"Selected end date: {end_date}")
 
     start = start_date
     stop = end_date
@@ -114,15 +114,48 @@ def get_data_from_measurement(mast, start_date, end_date):
     #Based on selection of mast in app, the associated dev_eui is selected below
     dev_eui = mast_dict[mast]
 
-    df_gt, sensor_depth_dict, gt_dt_obj = db_connector.get_ground_temp(dev_eui, start, stop)
-    df_weather = db_connector.get_sensor_data(dev_eui, "Weather Sensor", start, stop)
-    df_incl = db_connector.get_sensor_data(dev_eui, "Inclination Sensor", start, stop)
+    try:
+        df_gt, gt_dt_obj = db_connector.get_ground_temp(dev_eui, start, stop)
+        sensor_depth_dict = db_connector.get_ground_temp_sensor_depths(dev_eui)
+        fig_gt = plot_measures(df_gt, ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}", label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")   
+    except db_connector.EmptyQuerySet as e:
+        logger.error(f"No data found for ground temperature query: {e}")
+        df_gt = None
+        fig_gt = plot_no_values(message="No data found for the given quuery", ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}")
+    except db_connector.RecordingDeviceNotFound as e:
+        logger.error(f"Recording device not found: {e}")
+        df_gt = None
+        fig_gt = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}")
 
-    fig_gt = plot_measures(df_gt, ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}", label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")   
-    fig_airtemp = plot_measures(df_weather[['AirTemp']], ylabel="Temperature (°C)", title=f"Air Temperature - {mast}", label_names=["Air Temperature"], legend_title="Measurement")
-    fig_rh = plot_measures(df_weather[['RelHum']], ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}", label_names=["Relative Humidity"], legend_title="Measurement")
-    fig_bp = plot_measures(df_weather[['BarometricPressure']], ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}", label_names=["Barometric Pressure"], legend_title="Measurement")
-    fig_incl = plot_measures(df_incl, ylabel="Inclination (deg)", title=f"Inclination - {mast}", legend_title="Measurement")
+    try:
+        df_weather = db_connector.get_sensor_data(dev_eui, "Weather Sensor", start, stop)
+        fig_airtemp = plot_measures(df_weather[['AirTemp']], ylabel="Temperature (°C)", title=f"Air Temperature - {mast}", label_names=["Air Temperature"], legend_title="Measurement")
+        fig_rh = plot_measures(df_weather[['RelHum']], ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}", label_names=["Relative Humidity"], legend_title="Measurement")
+        fig_bp = plot_measures(df_weather[['BarometricPressure']], ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}", label_names=["Barometric Pressure"], legend_title="Measurement")
+    except db_connector.EmptyQuerySet as e:
+        logger.error(f"No data found for weather sensor query: {e}")
+        df_weather = None
+        fig_airtemp = plot_no_values(message="No data found for the given quuery", ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
+        fig_rh = plot_no_values(message="No data found for the given quuery", ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
+        fig_bp = plot_no_values(message="No data found for the given quuery", ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
+    except db_connector.RecordingDeviceNotFound as e:
+        logger.error(f"Recording device not found: {e}")
+        df_weather = None
+        fig_airtemp = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
+        fig_rh = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
+        fig_bp = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
+
+    try:
+        df_incl = db_connector.get_sensor_data(dev_eui, "Inclination Sensor", start, stop)
+        fig_incl = plot_measures(df_incl, ylabel="Inclination (deg)", title=f"Inclination - {mast}", legend_title="Measurement")
+    except db_connector.EmptyQuerySet as e:
+        logger.error(f"No data found for inclination sensor query: {e}")
+        df_incl = None
+        fig_incl = plot_no_values(message="No data found for the given quuery", ylabel="Inclination (deg)", title=f"Inclination - {mast}")
+    except db_connector.RecordingDeviceNotFound as e:
+        logger.error(f"Recording device not found: {e}")
+        df_incl = None
+        fig_incl = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Inclination (deg)", title=f"Inclination - {mast}")
 
     graph1 = dcc.Graph(figure=fig_gt, className="border")
     graph2 = dcc.Graph(figure=fig_airtemp, className="border")
@@ -137,8 +170,13 @@ def get_data_from_measurement(mast, start_date, end_date):
     ]
 
     # Prepare data for the table
-    row_data = df_gt.to_dict("records")
-    column_defs = [{"field": i} for i in df_gt.columns]
+    if df_gt is not None:
+        row_data = df_gt.to_dict("records")
+        column_defs = [{"field": i} for i in df_gt.columns]
+    else:
+        row_data = []
+        column_defs = []
+
 
     return all_graphs, row_data, column_defs
  
@@ -162,7 +200,7 @@ def plot_measures(df, ylabel="", title="", label_names=None, legend_title=""):
             y=df[column],  # Y-axis (Temperature values)
             mode='lines+markers',  # Lines and markers
             name=label,  # Label for each line (Depth sensor)
-            marker=dict(size=6)  # Marker customization
+            marker=dict(size=6),  # Marker customization
         ))
 
     fig.update_layout(
@@ -175,6 +213,28 @@ def plot_measures(df, ylabel="", title="", label_names=None, legend_title=""):
 
     return fig
 
+
+def plot_no_values(message="No data returned...", ylabel="", title=""):
+    """Plot a message when no values are available"""
+    
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=[0],  # X-axis (Timestamp)
+        y=[0],  # Y-axis (Temperature values)
+        mode='text',  # Text mode
+        text=message,  # Text message
+        textfont=dict(size=24, color='grey', family='Arial', weight=100)  # Font size, color, and bold text
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='Time',
+        yaxis_title=ylabel,
+        template='plotly_white'
+    )
+
+    return fig
 
 
 if __name__ == "__main__":
