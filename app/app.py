@@ -114,18 +114,28 @@ def get_data_from_measurement(mast, start_date, end_date):
     #Based on selection of mast in app, the associated dev_eui is selected below
     dev_eui = mast_dict[mast]
 
+    ylabel = "Temperature (°C)"
+    title = f"Ground Temperature - {mast}"
     try:
         df_gt, gt_dt_obj = db_connector.get_ground_temp(dev_eui, start, stop)
         sensor_depth_dict = db_connector.get_ground_temp_sensor_depths(dev_eui)
-        fig_gt = plot_measures(df_gt, ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}", label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")   
+        fig_gt = plot_measures(df_gt, ylabel=ylabel, title=title, label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")   
     except db_connector.EmptyQuerySet as e:
-        logger.error(f"No data found for ground temperature query: {e}")
+        message = "No data found for the given ground temperature sensor query"
+        logger.error(f"{message}: {e}")
         df_gt = None
-        fig_gt = plot_no_values(message="No data found for the given quuery", ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}")
+        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
     except db_connector.RecordingDeviceNotFound as e:
-        logger.error(f"Recording device not found: {e}")
+        message = f"Recording device {dev_eui} not found"
+        logger.error(f"{message}: {e}")
         df_gt = None
-        fig_gt = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Temperature (°C)", title=f"Ground Temperature - {mast}")
+        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
+    except Exception as e:
+        message = "An unknown error occurred"
+        logger.error(f"{message}: {e}")
+        df_gt = None
+        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
+
 
     try:
         df_weather = db_connector.get_sensor_data(dev_eui, "Weather Sensor", start, stop)
@@ -133,29 +143,47 @@ def get_data_from_measurement(mast, start_date, end_date):
         fig_rh = plot_measures(df_weather[['RelHum']], ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}", label_names=["Relative Humidity"], legend_title="Measurement")
         fig_bp = plot_measures(df_weather[['BarometricPressure']], ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}", label_names=["Barometric Pressure"], legend_title="Measurement")
     except db_connector.EmptyQuerySet as e:
-        logger.error(f"No data found for weather sensor query: {e}")
+        message = "No data found for the given weather sensor query"
+        logger.error(f"{message}: {e}")
         df_weather = None
-        fig_airtemp = plot_no_values(message="No data found for the given quuery", ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
-        fig_rh = plot_no_values(message="No data found for the given quuery", ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
-        fig_bp = plot_no_values(message="No data found for the given quuery", ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
+        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
+        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
+        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
     except db_connector.RecordingDeviceNotFound as e:
-        logger.error(f"Recording device not found: {e}")
+        message = f"Recording device {dev_eui} not found"
+        logger.error(f"{message}: {e}")
         df_weather = None
-        fig_airtemp = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
-        fig_rh = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
-        fig_bp = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
+        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
+        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
+        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
+    except Exception as e:
+        message = "An unknown error occurred"
+        logger.error(f"{message}: {e}")
+        df_weather = None
+        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
+        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
+        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
+
 
     try:
         df_incl = db_connector.get_sensor_data(dev_eui, "Inclination Sensor", start, stop)
         fig_incl = plot_measures(df_incl, ylabel="Inclination (deg)", title=f"Inclination - {mast}", legend_title="Measurement")
     except db_connector.EmptyQuerySet as e:
-        logger.error(f"No data found for inclination sensor query: {e}")
+        message = "No data found for the given inclination sensor query"
+        logger.error(f"{message}: {e}")
         df_incl = None
-        fig_incl = plot_no_values(message="No data found for the given quuery", ylabel="Inclination (deg)", title=f"Inclination - {mast}")
+        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
     except db_connector.RecordingDeviceNotFound as e:
-        logger.error(f"Recording device not found: {e}")
+        message = f"Recording device {dev_eui} not found"
+        logger.error(f"{message}: {e}")
         df_incl = None
-        fig_incl = plot_no_values(message=f"RecordingDevice {dev_eui} not found", ylabel="Inclination (deg)", title=f"Inclination - {mast}")
+        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
+    except Exception as e:
+        message = "An unknown error occurred"
+        logger.error(f"{message}: {e}")
+        df_incl = None
+        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
+
 
     graph1 = dcc.Graph(figure=fig_gt, className="border")
     graph2 = dcc.Graph(figure=fig_airtemp, className="border")

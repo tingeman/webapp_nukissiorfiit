@@ -16,6 +16,8 @@ DATABASES = {
         'PASSWORD': MDB_POSTGRES_SETTINGS['POSTGRES_PASSWORD'],
         'HOST': MDB_POSTGRES_SETTINGS['POSTGRES_HOST'],
         'PORT': MDB_POSTGRES_SETTINGS['POSTGRES_PORT'],
+        'CONN_MAX_AGE': 0,
+        'CONN_HEALTH_CHECKS': True,
     }
 }
 
@@ -26,3 +28,6 @@ INSTALLED_APPS = [
 ]
 
 SECRET_KEY = 'fake-key'  # Needed for some internal operations
+
+
+
