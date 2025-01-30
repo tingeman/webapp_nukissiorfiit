@@ -99,7 +99,7 @@ app.layout = html.Div(
 
 def get_data_from_measurement(mast, start_date, end_date):
     """Get data from the database and plot it"""
-    
+
     # How do I get the IP address of the client sending the request?
     client_ip = request.remote_addr
     request_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

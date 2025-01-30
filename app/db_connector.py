@@ -3,6 +3,7 @@ import sys
 import logging
 from pathlib import Path
 import django
+from django.db import connections
 from django.db.models import F
 import pandas as pd
 
@@ -20,6 +21,12 @@ django.setup()
 
 # Import Django models
 from django_integration.monitoring_db import models
+
+
+def close_all_stale_db_connections():
+    # See https://stackoverflow.com/a/62632743
+    for conn in connections.all():
+        conn.close_if_unusable_or_obsolete()
 
 
 # def get_measurements_from_monitoringdb(deveui, sensor_dict, start, stop):
@@ -87,7 +94,10 @@ def qs_to_df(qs):
 
 def get_sensor_data(deveui, sensor_name, start, stop):
     # using django models.RecordingDevice to find the recording device with the field deveui = dev_eui
-    
+
+    # Call this before any database operation sequence
+    close_all_stale_db_connections()
+
     try:
         rd = models.RecordingDevice.objects.get(deveui=deveui)
     except models.RecordingDevice.DoesNotExist:
@@ -127,6 +137,9 @@ def get_sensor_data(deveui, sensor_name, start, stop):
 def get_ground_temp(deveui, start, stop):
     # using django models.RecordingDevice to find the recording device with the field deveui = dev_eui
     
+    # Call this before any database operation sequence
+    close_all_stale_db_connections()
+
     try:
         rd = models.RecordingDevice.objects.get(deveui=deveui)
     except models.RecordingDevice.DoesNotExist:
@@ -165,6 +178,10 @@ def get_ground_temp(deveui, start, stop):
 
 
 def get_ground_temp_sensor_depths(deveui):
+
+    # Call this before any database operation sequence
+    close_all_stale_db_connections()
+
     try:
         rd = models.RecordingDevice.objects.get(deveui=deveui)
     except models.RecordingDevice.DoesNotExist:
