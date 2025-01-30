@@ -114,6 +114,28 @@ def get_data_from_measurement(mast, start_date, end_date):
     #Based on selection of mast in app, the associated dev_eui is selected below
     dev_eui = mast_dict[mast]
 
+    ylabel = "Voltage (V)"
+    title = f"Battery Level - {mast}"
+    try:
+        df_batlev = db_connector.get_sensor_data(dev_eui, "BatteryVoltage", start, stop)
+        fig_batlev = plot_measures(df_batlev, ylabel=ylabel, title=title, label_names="Battery level", legend_title="Measurement")
+    except db_connector.EmptyQuerySet as e:
+        message = "No data found for the given BatteryVoltage sensor query"
+        logger.error(f"{message}: {e}")
+        df_batlev = None
+        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
+    except db_connector.RecordingDeviceNotFound as e:
+        message = f"Recording device {dev_eui} not found"
+        logger.error(f"{message}: {e}")
+        df_batlev = None
+        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
+    except Exception as e:
+        message = "An unknown error occurred"
+        logger.error(f"{message}: {e}")
+        df_batlev = None
+        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
+
+
     ylabel = "Temperature (°C)"
     title = f"Ground Temperature - {mast}"
     try:
@@ -185,6 +207,7 @@ def get_data_from_measurement(mast, start_date, end_date):
         fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
 
 
+    graph0 = dcc.Graph(figure=fig_batlev, className="border")
     graph1 = dcc.Graph(figure=fig_gt, className="border")
     graph2 = dcc.Graph(figure=fig_airtemp, className="border")
     graph3 = dcc.Graph(figure=fig_rh, className="border")
@@ -192,9 +215,15 @@ def get_data_from_measurement(mast, start_date, end_date):
     graph5 = dcc.Graph(figure=fig_incl, className="border")
 
     all_graphs = [
-        dbc.Row([dbc.Col(graph1, lg=6), dbc.Col(graph2, lg=6)]),
-        dbc.Row([dbc.Col(graph3, lg=6), dbc.Col(graph4, lg=6)]),
-        dbc.Row([dbc.Col(graph5, lg=6)], className="mt-4"),
+        dbc.Row([dbc.Col(graph0, lg=6),]),
+        dbc.Row([dbc.Col(graph1, lg=6),]),
+        dbc.Row([dbc.Col(graph2, lg=6),]),
+        dbc.Row([dbc.Col(graph3, lg=6),]),
+        dbc.Row([dbc.Col(graph4, lg=6),]),
+        dbc.Row([dbc.Col(graph5, lg=6),], className="mt-4"),
+        # dbc.Row([dbc.Col(graph1, lg=6), dbc.Col(graph2, lg=6)]),
+        # dbc.Row([dbc.Col(graph3, lg=6), dbc.Col(graph4, lg=6)]),
+        # dbc.Row([dbc.Col(graph5, lg=6)], className="mt-4"),
     ]
 
     # Prepare data for the table
