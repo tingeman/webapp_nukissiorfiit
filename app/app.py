@@ -63,7 +63,7 @@ app.layout = html.Div(
         html.H5("Select the date range (YYYY/MM/DD)"),
         dbc.Row([dbc.Col(html.Div(dcc.DatePickerRange(id='date-range-picker',
                                              min_date_allowed=dt(2023, 1, 1),
-                                             max_date_allowed=dt.now(),
+                                             max_date_allowed=dt.combine(dt.now().date(), dt.max.time()),
                                              initial_visible_month=dt.now(),
                                              start_date_placeholder_text='Start Date',
                                              end_date_placeholder_text='End Date',
@@ -90,6 +90,15 @@ app.layout = html.Div(
     ],
     className="dbc p-4",
 )
+
+
+@app.callback(
+    Output('date-range-picker', 'max_date_allowed'),
+    Input('date-range-picker', 'id')  # This input is just a placeholder to trigger the callback
+)
+def update_max_date_allowed(_):
+    return dt.combine(dt.now().date(), dt.max.time())
+
 
 #Still have to implement if the user want to change the date range, without changing the mast.
 @callback(
