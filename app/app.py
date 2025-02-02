@@ -145,6 +145,9 @@ def get_data_from_measurement(mast, start_date, end_date):
         fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
 
 
+    logging.debug(df_batlev)
+    
+
     ylabel = "Temperature (°C)"
     title = f"Ground Temperature - {mast}"
     try:

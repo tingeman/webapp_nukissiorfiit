@@ -3,6 +3,9 @@ from dotenv import dotenv_values
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+USE_TZ = True
+TIME_ZONE = 'UTC'
+
 # SECURITY WARNING: keep the secret key used in production secret!
 MDB_POSTGRES_SETTINGS = dotenv_values(BASE_DIR.parent / 'secrets' / 'mdb-postgres.env')
 

@@ -6,6 +6,7 @@ import django
 from django.db import connections
 from django.db.models import F
 import pandas as pd
+import ipdb
 
 
 # Get the absolute path of the main project folder. It is the folder in which this file lives.
