@@ -16,14 +16,16 @@ services:
     build:
       dockerfile: Dockerfile
     container_name: webapp-nuki
-    # volumes:
-    #   - ./secrets:/app/secrets
+    volumes:
+      - ./secrets/webapp_nuki_mdb-postgres.env:/app/secrets/mdb-postgres.env:ro
+      - ./secrets/webapp_nuki.env:/app/secrets/.env.production:ro
     ports:
       - 8050:8050
     stdin_open: true # docker run -i
     tty: true        # docker run -t
     environment:
       - APP_ENV=development
+      - DASH_ASYNC_SUPPORT=0
 
 
 # To (re)build images:       docker compose -f compose.develop.yml build

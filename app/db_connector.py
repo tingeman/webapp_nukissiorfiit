@@ -7,7 +7,7 @@ from django.db import connections
 from django.db.models import F
 import pandas as pd
 import ipdb
-
+import asgiref.sync
 
 # Get the absolute path of the main project folder. It is the folder in which this file lives.
 django_project_path = Path(__file__).resolve().parent / 'django_integration'
@@ -203,3 +203,9 @@ def get_ground_temp_sensor_depths(deveui):
     sensors_sorted_by_depth = dict(sorted(sensors_depths.items(), key=lambda item: item[1], reverse=True))
 
     return sensors_sorted_by_depth
+
+
+# Async wrappers for Django ORM functions
+get_sensor_data_async = asgiref.sync.sync_to_async(get_sensor_data, thread_sensitive=True)
+get_ground_temp_async = asgiref.sync.sync_to_async(get_ground_temp, thread_sensitive=True)
+get_ground_temp_sensor_depths_async = asgiref.sync.sync_to_async(get_ground_temp_sensor_depths, thread_sensitive=True)

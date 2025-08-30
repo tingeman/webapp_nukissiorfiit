@@ -10,11 +10,11 @@ pandas
 matplotlib
 matplotlib-inline
 plotly
-dash
+dash>=2.6.0
 dash-bootstrap-components
 dash-ag-grid
 influxdb-client
-Flask
+flask>=2.1.0
 werkzeug
 gunicorn
 kaleido

@@ -1,5 +1,7 @@
-from flask import Flask, request
+import os
+# os.environ["DASH_ASYNC_SUPPORT"] = "0"
 
+from flask import Flask, request
 from dash import Dash, Input, Output, callback, dcc, html
 import plotly.express as px
 import pandas as pd
@@ -11,6 +13,8 @@ import datetime
 from datetime import datetime as dt
 from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
+
+import asyncio
 
 import db_connector
 
@@ -28,6 +32,11 @@ else:
 logger = logging.getLogger(__name__)
 
 logger.info("app.py loaded")
+
+# Print a debug message
+logger.info(f"DASH_ASYNC_SUPPORT: {os.environ['DASH_ASYNC_SUPPORT']}")
+
+
 
 mastopt = ["Mast 6", "Mast 7", "Mast 9", "Mast 12", "Mast 13"]
 
@@ -106,7 +115,7 @@ def update_max_date_allowed(_):
     [Input("mast", "value"), Input("date-range-picker", "start_date"),Input("date-range-picker", "end_date")], 
 )
 
-def get_data_from_measurement(mast, start_date, end_date):
+async def get_data_from_measurement(mast, start_date, end_date):
     """Get data from the database and plot it"""
 
     # How do I get the IP address of the client sending the request?
@@ -125,8 +134,9 @@ def get_data_from_measurement(mast, start_date, end_date):
 
     ylabel = "Voltage (V)"
     title = f"Battery Level - {mast}"
+    import traceback
     try:
-        df_batlev = db_connector.get_sensor_data(dev_eui, "BatteryVoltage", start, stop)
+        df_batlev = await db_connector.get_sensor_data_async(dev_eui, "BatteryVoltage", start, stop)
         fig_batlev = plot_measures(df_batlev, ylabel=ylabel, title=title, label_names="Battery level", legend_title="Measurement")
     except db_connector.EmptyQuerySet as e:
         message = "No data found for the given BatteryVoltage sensor query"
@@ -140,7 +150,7 @@ def get_data_from_measurement(mast, start_date, end_date):
         fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
     except Exception as e:
         message = "An unknown error occurred"
-        logger.error(f"{message}: {e}")
+        logger.error(f"{message}: {e}\n{traceback.format_exc()}")
         df_batlev = None
         fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
 
@@ -151,9 +161,9 @@ def get_data_from_measurement(mast, start_date, end_date):
     ylabel = "Temperature (°C)"
     title = f"Ground Temperature - {mast}"
     try:
-        df_gt, gt_dt_obj = db_connector.get_ground_temp(dev_eui, start, stop)
-        sensor_depth_dict = db_connector.get_ground_temp_sensor_depths(dev_eui)
-        fig_gt = plot_measures(df_gt, ylabel=ylabel, title=title, label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")   
+        df_gt, gt_dt_obj = await db_connector.get_ground_temp_async(dev_eui, start, stop)
+        sensor_depth_dict = await db_connector.get_ground_temp_sensor_depths_async(dev_eui)
+        fig_gt = plot_measures(df_gt, ylabel=ylabel, title=title, label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")
     except db_connector.EmptyQuerySet as e:
         message = "No data found for the given ground temperature sensor query"
         logger.error(f"{message}: {e}")
@@ -172,7 +182,7 @@ def get_data_from_measurement(mast, start_date, end_date):
 
 
     try:
-        df_weather = db_connector.get_sensor_data(dev_eui, "Weather Sensor", start, stop)
+        df_weather = await db_connector.get_sensor_data_async(dev_eui, "Weather Sensor", start, stop)
         fig_airtemp = plot_measures(df_weather[['AirTemp']], ylabel="Temperature (°C)", title=f"Air Temperature - {mast}", label_names=["Air Temperature"], legend_title="Measurement")
         fig_rh = plot_measures(df_weather[['RelHum']], ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}", label_names=["Relative Humidity"], legend_title="Measurement")
         fig_bp = plot_measures(df_weather[['BarometricPressure']], ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}", label_names=["Barometric Pressure"], legend_title="Measurement")
@@ -200,7 +210,7 @@ def get_data_from_measurement(mast, start_date, end_date):
 
 
     try:
-        df_incl = db_connector.get_sensor_data(dev_eui, "Inclination Sensor", start, stop)
+        df_incl = await db_connector.get_sensor_data_async(dev_eui, "Inclination Sensor", start, stop)
         fig_incl = plot_measures(df_incl, ylabel="Inclination (deg)", title=f"Inclination - {mast}", legend_title="Measurement")
     except db_connector.EmptyQuerySet as e:
         message = "No data found for the given inclination sensor query"
