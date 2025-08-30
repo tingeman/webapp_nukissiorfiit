@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 logger.info("app.py loaded")
 
 # Print a debug message
-logger.info(f"DASH_ASYNC_SUPPORT: {os.environ['DASH_ASYNC_SUPPORT']}")
+logger.info(f"DASH_ASYNC_SUPPORT: {os.environ.get('DASH_ASYNC_SUPPORT', 'Not set!')}")
 
 
 
