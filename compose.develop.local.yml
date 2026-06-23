@@ -1,0 +1,5 @@
+services:
+  webapp_nuki:
+    volumes:
+      - ./secrets/webapp_nuki_mdb-postgres.dev.env:/app/secrets/mdb-postgres.env:ro
+      - ./secrets/webapp_nuki.dev.env:/app/secrets/.env.production:ro
