@@ -25,9 +25,30 @@ python -m pip install -r requirements.txt
 ```
 
 ## Usage
+
+### Current Recommended Local Startup (Docker)
+
+From repo root:
+
+```powershell
+docker compose --project-name nuki -f .\compose.develop.yml -f .\compose.develop.local.yml up -d --build webapp_nuki
+```
+
+Open app at:
+
+`http://localhost:8050/app/nuki/`
+
+Optional: start nginx too (for localhost:80):
+
+```powershell
+docker compose --project-name nuki -f .\compose.develop.yml -f .\compose.develop.local.yml up -d --build nginx webapp_nuki
+```
+
+### Direct Python Run (non-docker)
+
 Run development server:
 ```bash
 python ./app/app.py
 ```
-Navigate to web page `127.0.0.1:8050`.
+Navigate to web page `127.0.0.1:8050/app/nuki/`.
 

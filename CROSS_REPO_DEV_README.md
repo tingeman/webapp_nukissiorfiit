@@ -28,6 +28,34 @@ From frontend repo root:
 docker compose --project-name nuki -f .\compose.develop.yml -f .\compose.develop.local.yml up -d --build webapp_nuki
 ```
 
+### Optional: start frontend nginx too (serves port 80)
+
+```powershell
+docker compose --project-name nuki -f .\compose.develop.yml -f .\compose.develop.local.yml up -d --build nginx webapp_nuki
+```
+
+## Current Working State (2026-06-23)
+
+Validated working setup:
+
+- backend containers up: `webapp-monitoringdb-dev`, `mdb-nginx-service`, `mdb-timescaledb-dev`, `mdb-adminer-dev`
+- frontend container up: `webapp-nuki`
+- production dump restored into local TimescaleDB using backend restore script
+- frontend app reachable and loading data against local backend DB
+
+Reachable URLs:
+
+- Frontend Dash app: <http://localhost:8050/app/nuki/>
+- Backend Django admin direct: <http://localhost:8099/admin/>
+- Backend Django admin via nginx: <http://localhost:8081/mdb/admin/>
+- Adminer: <http://localhost:8080>
+
+Important routing notes:
+
+- backend root on `8099` does not provide a landing page; use `/admin/`
+- backend nginx route is prefixed with `/mdb/`
+- frontend Dash app is mounted at `/app/nuki/`
+
 ## Stop / Down Workflow
 
 ### Stop both stacks (keep containers)
@@ -107,6 +135,8 @@ Example commit style:
 - 2026-06-23: Added local override path using `compose.develop.local.yml` to preserve base compose behavior.
 - 2026-06-23: Added frontend local env files with `.dev` naming for local DB and app settings.
 - 2026-06-23: Added backend Bash dump script at `scripts/db/dump_postgres.sh` for full DB backups from env settings.
+- 2026-06-23: Added restore workflow in `scripts/db/restore_postgres.sh` that recreates DB from `template0`, pins Timescale extension version from `compose.pins.env`, and restores production dump into local DB.
+- 2026-06-23: Verified live local endpoints for backend and frontend stacks.
 
 ## Production DB Dump Script (Bash)
 
