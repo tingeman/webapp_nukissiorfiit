@@ -138,6 +138,11 @@ async def get_data_from_measurement(mast, start_date, end_date):
     try:
         df_batlev = await db_connector.get_sensor_data_async(dev_eui, "BatteryVoltage", start, stop)
         fig_batlev = plot_measures(df_batlev, ylabel=ylabel, title=title, label_names="Battery level", legend_title="Measurement")
+    except db_connector.QueryTimeout as e:
+        message = "Backend request timed out for BatteryVoltage sensor query"
+        logger.error(f"{message}: {e}")
+        df_batlev = None
+        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
     except db_connector.EmptyQuerySet as e:
         message = "No data found for the given BatteryVoltage sensor query"
         logger.error(f"{message}: {e}")
@@ -164,6 +169,11 @@ async def get_data_from_measurement(mast, start_date, end_date):
         df_gt, gt_dt_obj = await db_connector.get_ground_temp_async(dev_eui, start, stop)
         sensor_depth_dict = await db_connector.get_ground_temp_sensor_depths_async(dev_eui)
         fig_gt = plot_measures(df_gt, ylabel=ylabel, title=title, label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")
+    except db_connector.QueryTimeout as e:
+        message = "Backend request timed out for ground temperature sensor query"
+        logger.error(f"{message}: {e}")
+        df_gt = None
+        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
     except db_connector.EmptyQuerySet as e:
         message = "No data found for the given ground temperature sensor query"
         logger.error(f"{message}: {e}")
@@ -186,6 +196,13 @@ async def get_data_from_measurement(mast, start_date, end_date):
         fig_airtemp = plot_measures(df_weather[['AirTemp']], ylabel="Temperature (°C)", title=f"Air Temperature - {mast}", label_names=["Air Temperature"], legend_title="Measurement")
         fig_rh = plot_measures(df_weather[['RelHum']], ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}", label_names=["Relative Humidity"], legend_title="Measurement")
         fig_bp = plot_measures(df_weather[['BarometricPressure']], ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}", label_names=["Barometric Pressure"], legend_title="Measurement")
+    except db_connector.QueryTimeout as e:
+        message = "Backend request timed out for weather sensor query"
+        logger.error(f"{message}: {e}")
+        df_weather = None
+        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
+        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
+        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
     except db_connector.EmptyQuerySet as e:
         message = "No data found for the given weather sensor query"
         logger.error(f"{message}: {e}")
@@ -212,6 +229,11 @@ async def get_data_from_measurement(mast, start_date, end_date):
     try:
         df_incl = await db_connector.get_sensor_data_async(dev_eui, "Inclination Sensor", start, stop)
         fig_incl = plot_measures(df_incl, ylabel="Inclination (deg)", title=f"Inclination - {mast}", legend_title="Measurement")
+    except db_connector.QueryTimeout as e:
+        message = "Backend request timed out for inclination sensor query"
+        logger.error(f"{message}: {e}")
+        df_incl = None
+        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
     except db_connector.EmptyQuerySet as e:
         message = "No data found for the given inclination sensor query"
         logger.error(f"{message}: {e}")

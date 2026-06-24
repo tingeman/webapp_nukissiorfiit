@@ -1,8 +1,5 @@
-django[gis]==4.2
-django-extensions
-django-timescaledb
-psycopg[binary]
 python-dotenv
+asgiref
 pydantic
 pydantic-settings
 setuptools
@@ -14,6 +11,7 @@ dash>=2.6.0
 dash-bootstrap-components
 dash-ag-grid
 influxdb-client
+requests
 flask>=2.1.0
 werkzeug
 gunicorn
