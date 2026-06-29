@@ -1,8 +1,5 @@
 # Project specific
-*.png
-*.env
-.env.*
-
+secrets/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

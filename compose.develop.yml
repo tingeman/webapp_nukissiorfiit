@@ -2,15 +2,18 @@
 # docker compose -f compose.develop.yml up -d
 
 services:
-  nginx:
-    build: 
-      context: ./nginx
+  nginx_nuki:
+    image: nginx:alpine
     ports:
       - "80:80"
       - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./secrets/nginx:/etc/nginx/ssl:ro
     restart: always
     depends_on:
       - webapp_nuki
+
 
   webapp_nuki:
     build:
@@ -18,7 +21,7 @@ services:
     container_name: webapp-nuki
     volumes:
       - ./secrets/webapp_nuki_mdb-postgres.env:/app/secrets/mdb-postgres.env:ro
-      - ./secrets/webapp_nuki.env:/app/secrets/.env.production:ro
+      - ./secrets/webapp_nuki.dev.env:/app/secrets/.env.development:ro
     ports:
       - 8050:8050
     stdin_open: true # docker run -i

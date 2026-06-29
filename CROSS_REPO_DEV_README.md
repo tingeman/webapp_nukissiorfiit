@@ -2,6 +2,11 @@
 
 This file is the operational guide for cross-repo local development and the place to document ongoing intended usage and workflow changes.
 
+## TODOs
+[] Ensure backend settings are in development and production .env files. Currently app is falling back to hard coded default settings (Release-C fix)
+[] Remove `/app/django_integration` folder, and `mdb-postgres.env` files, they are no longer used after transition to data retrieval through REST API (Release-C fix)
+
+
 ## Scope
 
 Repositories in shared workspace:
@@ -18,7 +23,7 @@ Goals:
 From backend repo root:
 
 ```powershell
-docker compose --project-name mdb --env-file .\secrets\mdb-postgres.dev.env -f .\docker-compose.develop.yml up -d --build
+docker compose --project-name mdb --env-file .\secrets\mdb-postgres.dev.env --env-file .\compose.pins.env -f .\compose.develop.yml up -d --build
 ```
 
 ### Frontend (base compose + local override)
@@ -62,7 +67,7 @@ Important routing notes:
 
 ```powershell
 # backend
-docker compose --project-name mdb --env-file .\secrets\mdb-postgres.dev.env -f .\docker-compose.develop.yml stop
+docker compose --project-name mdb --env-file .\secrets\mdb-postgres.dev.env --env-file compose.pins.env -f .\compose.develop.yml stop
 
 # frontend
 docker compose --project-name nuki -f .\compose.develop.yml -f .\compose.develop.local.yml stop
@@ -72,7 +77,7 @@ docker compose --project-name nuki -f .\compose.develop.yml -f .\compose.develop
 
 ```powershell
 # backend
-docker compose --project-name mdb --env-file .\secrets\mdb-postgres.dev.env -f .\docker-compose.develop.yml down
+docker compose --project-name mdb --env-file .\secrets\mdb-postgres.dev.env -f .\compose.develop.yml down
 
 # frontend
 docker compose --project-name nuki -f .\compose.develop.yml -f .\compose.develop.local.yml down

@@ -16,6 +16,10 @@ class ConfigSettings(BaseSettings):
     influxdb_url: str = Field(..., env="INFLUXDB_URL")
     influxdb_token: str = Field(..., env="INFLUXDB_TOKEN")
     influxdb_org: str = Field(..., env="INFLUXDB_ORG")
+    backend_api_base_url: str = Field("http://host.docker.internal:8099/api/v1", env="BACKEND_API_BASE_URL")
+    backend_api_timeout_seconds: float = Field(30.0, env="BACKEND_API_TIMEOUT_SECONDS")
+    backend_api_max_retries: int = Field(2, env="BACKEND_API_MAX_RETRIES")
+    backend_api_backoff_factor: float = Field(0.5, env="BACKEND_API_BACKOFF_FACTOR")
 
     class Config:
         env_file = ".env"
