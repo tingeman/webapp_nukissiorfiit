@@ -16,6 +16,47 @@
 ## Notes
 - ***2025-08-29:*** Required packages in requirements.txt are not version number locked. An automatic rebuild in connection with an ansible relaunch of the server, must have caused upgrading of some packages that introduced new behavior. The app now by default runs in async mode, which is incompatible with calls to the Django ORM. Fixed by wrapping all calls to `db_connector` functions that access the Django ORM with a call to `asgiref.sync.sync_to_async()`. This problem stresses the need to keep all Django ORM access separate in the `db_connector` module, for better mainainability.
 
+## Release build and tests
+
+Releases are built from a tag on `develop/main` by `scripts/build_image.sh` in dtu_sus_data02
+(`scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git <tag>`).
+It runs a plain `docker build` of the checkout and then `bash tests/run.sh <image>`; no bundle
+is written unless the tests pass.
+
+### Dependencies (lock file)
+
+- Direct dependencies: `app/requirements.in` (production), `app/requirements-dev.in`
+  (ipython, ipdb, matplotlib-inline; not in the image).
+- Locks: `app/requirements.txt` and `app/requirements-dev.txt`, all transitive packages with
+  hashes. The Dockerfile installs `requirements.txt` with `pip install --require-hashes`.
+- Compile them after editing an `.in` file (needs Docker and Python 3.8+ on the workstation;
+  uv runs in a container of the pinned Python image, from `compose.pins.env`):
+
+```bash
+python scripts/compile_lock.py                    # keep the locked versions, add/remove what changed
+python scripts/compile_lock.py --package dash     # upgrade one package (repeatable)
+python scripts/compile_lock.py --upgrade --exclude-newer 2026-11-01   # upgrade all, with a cooldown
+```
+
+- Base image: `ARG PYTHON_IMAGE` in the Dockerfile and `NUKI_PYTHON_IMAGE` in
+  `compose.pins.env` hold the same `python:<version>-slim@sha256:<digest>` (a test checks
+  it). To update, change both (`docker buildx imagetools inspect python:3.13-slim`) and
+  recompile the locks.
+
+### Build and test locally
+
+```bash
+docker build -t webapp_nuki:local .
+bash tests/run.sh webapp_nuki:local                            # full suite (what the release build runs)
+TEST_FILTER='^unit:' bash tests/run.sh webapp_nuki:local       # only the unit tests
+bash tests/run.sh --quick webapp_nuki:local                    # skip the smoke tests (container start)
+APP_SRC=app bash tests/run.sh webapp_nuki:local                # test the checkout's app/ without rebuilding
+```
+
+The tests use a stub of the monitoring_db API (`tests/fake_api.py`, fixtures in
+`tests/fixtures/`) and a dummy env file; no secrets, no network. See the header of
+`tests/run.sh`. The env variables the app reads are documented in `webapp_nuki.env.example`.
+
 ## Installation
 
 1) Clone repository from github

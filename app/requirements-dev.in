@@ -1,0 +1,7 @@
+# Dev/test-only tools, not in the production image. Production versions come from
+# requirements.txt. Install on top of it in a dev container:
+#   pip install --require-hashes -r requirements-dev.txt
+-c requirements.txt
+ipython>=9.15,<10
+ipdb>=0.13,<0.14
+matplotlib-inline>=0.2,<0.3

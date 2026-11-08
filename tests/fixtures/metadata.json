@@ -1,0 +1,28 @@
+{
+  "stations": [
+    {"id": 1, "identifier": "MAST06", "name": "Mast 6"}
+  ],
+  "recording_devices": [
+    {"id": 10, "deveui": "feedbeefcafe0002", "display_name": "Mast 6 logger", "serial": "M06", "station_id": 1, "station_identifier": "MAST06"}
+  ],
+  "sensors": [
+    {"id": 101, "recording_device_deveui": "feedbeefcafe0002", "name": "BatteryVoltage", "type": "battery", "relative_z": null, "recording_device_id": 10, "recording_device_serial": "M06", "station_identifier": "MAST06"},
+    {"id": 102, "recording_device_deveui": "feedbeefcafe0002", "name": "GroundTemp01", "type": "temperature", "relative_z": -0.1, "recording_device_id": 10, "recording_device_serial": "M06", "station_identifier": "MAST06"},
+    {"id": 103, "recording_device_deveui": "feedbeefcafe0002", "name": "GroundTemp02", "type": "temperature", "relative_z": -0.25, "recording_device_id": 10, "recording_device_serial": "M06", "station_identifier": "MAST06"},
+    {"id": 104, "recording_device_deveui": "feedbeefcafe0002", "name": "GroundTemp03", "type": "temperature", "relative_z": -0.5, "recording_device_id": 10, "recording_device_serial": "M06", "station_identifier": "MAST06"},
+    {"id": 105, "recording_device_deveui": "feedbeefcafe0002", "name": "Inclination Sensor", "type": "inclination", "relative_z": 2.0, "recording_device_id": 10, "recording_device_serial": "M06", "station_identifier": "MAST06"},
+    {"id": 106, "recording_device_deveui": "feedbeefcafe0002", "name": "Weather Sensor", "type": "weather", "relative_z": 3.0, "recording_device_id": 10, "recording_device_serial": "M06", "station_identifier": "MAST06"}
+  ],
+  "timeseries": [
+    {"id": 1001, "sensor_id": 101, "name": "BatteryVoltage"},
+    {"id": 1002, "sensor_id": 102, "name": "Temperature"},
+    {"id": 1003, "sensor_id": 103, "name": "Temperature"},
+    {"id": 1004, "sensor_id": 104, "name": "Temperature"},
+    {"id": 1005, "sensor_id": 105, "name": "InclX"},
+    {"id": 1006, "sensor_id": 105, "name": "InclY"},
+    {"id": 1007, "sensor_id": 106, "name": "AirTemp"},
+    {"id": 1008, "sensor_id": 106, "name": "RelHum"},
+    {"id": 1009, "sensor_id": 106, "name": "BarometricPressure"}
+  ],
+  "sensor_types": ["battery", "inclination", "temperature", "weather"]
+}
