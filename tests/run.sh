@@ -18,7 +18,8 @@
 # * image checks: the image's user is plotly (uid 30000), its command is gunicorn without
 #   --reload, it has a HEALTHCHECK, pip check passes, the app's packages import, the dev
 #   tools (IPython, ipdb) are not installed, and the Dockerfile's ARG PYTHON_IMAGE default is
-#   NUKI_PYTHON_IMAGE of compose.pins.env. One shared container.
+#   NUKI_PYTHON_IMAGE of compose.pins.env, and its stages are runtime, dev, prod (prod last,
+#   so a plain docker build builds it). One shared container.
 # * smoke tests (marked slow): the image started with its own command, a dummy env file and
 #   an unreachable INFLUXDB_URL on a private --internal network, with the stub API (run with
 #   the image's python) as the backend in the production URL form
@@ -250,7 +251,10 @@ t_pin() {
   [ -n "$pins" ] || fail_t "no NUKI_PYTHON_IMAGE in compose.pins.env"
   case "$pins" in *@sha256:*) ;; *) fail_t "NUKI_PYTHON_IMAGE is not pinned by digest: $pins" ;; esac
   expect "Dockerfile ARG PYTHON_IMAGE vs compose.pins.env NUKI_PYTHON_IMAGE" "$df" "$pins"
-  expect "Dockerfile FROM" "$(sed -n -e 's/\r$//' -e 's/^FROM //p' "$REPO_DIR/Dockerfile")" '${PYTHON_IMAGE}'
+  # The stages: only runtime uses the pinned base image, and prod (= runtime) is the last
+  # stage, the one a plain docker build (build_image.sh) builds
+  expect "Dockerfile FROM lines" "$(sed -n -e 's/\r$//' -e 's/^FROM //p' "$REPO_DIR/Dockerfile" | tr '\n' ';')" \
+    '${PYTHON_IMAGE} AS runtime;runtime AS dev;runtime AS prod;'
 }
 
 t_pip_check() { need_img; expect "pip check (${F[img.pipcheck.out]:-})" "${F[img.pipcheck.rc]:-}" "0"; }
@@ -353,7 +357,7 @@ add_test "image lacks the dev tools IPython and ipdb" t_no_dev_tools
 needs ""
 add_test "image command is gunicorn on :8050 without --reload" t_cmd
 add_test "image has a HEALTHCHECK on /app/nuki/ with python" t_healthcheck
-add_test "image Dockerfile ARG PYTHON_IMAGE equals NUKI_PYTHON_IMAGE in compose.pins.env (digest)" t_pin
+add_test "image Dockerfile ARG PYTHON_IMAGE equals NUKI_PYTHON_IMAGE in compose.pins.env (digest), prod is the last stage" t_pin
 
 needs app
 add_test --slow "smoke: app with unreachable InfluxDB starts and becomes healthy" t_smoke_healthy

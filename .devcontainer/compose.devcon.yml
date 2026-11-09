@@ -17,6 +17,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      target: dev   # ipdb, IPython; releases build the last stage (prod)
     # volumes:
     #   - ./secrets:/app/secrets
     ports:

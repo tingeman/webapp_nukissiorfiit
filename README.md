@@ -57,6 +57,29 @@ The tests use a stub of the monitoring_db API (`tests/fake_api.py`, fixtures in
 `tests/fixtures/`) and a dummy env file; no secrets, no network. See the header of
 `tests/run.sh`. The env variables the app reads are documented in `webapp_nuki.env.example`.
 
+### Development (dev stage)
+
+The Dockerfile has three stages: `runtime` (the production image), `dev` (runtime plus
+IPython/ipdb from `app/requirements-dev.txt`, gunicorn with `--reload`, one worker,
+`--timeout 0`) and `prod` (= runtime). Releases run a plain `docker build`, which builds the
+last stage, `prod`, only: the dev tools never reach a release, and `prod` must stay last.
+
+```bash
+docker compose -f compose.develop.yml up --build webapp_nuki      # build the dev stage and start
+docker build --target dev -t webapp_nuki:dev .                    # or build the dev image alone
+```
+
+- Code reload: `./app` is mounted over `/app`, so saving a `.py` file restarts the worker
+  (gunicorn polls the files; works on bind mounts from Windows). No rebuild needed.
+- ipdb: put `import ipdb; ipdb.set_trace()` in the code, trigger it in the browser, then
+  `docker attach webapp-nuki` to get the prompt (the service has `stdin_open` and `tty`).
+  Detach with Ctrl-P Ctrl-Q; Ctrl-C would stop the container. `--timeout 0` keeps gunicorn
+  from killing the worker while it waits at a breakpoint.
+- Rebuild (`--build`) after a change to `app/requirements*.txt` or the Dockerfile.
+- The env file comes from `secrets/webapp_nuki.dev.env` (mounted as
+  `/app/secrets/.env.development`); docker creates the empty mount point `app/secrets/` in
+  the checkout, which git ignores.
+
 ## Installation
 
 1) Clone repository from github

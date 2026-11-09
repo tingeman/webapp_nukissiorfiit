@@ -1,5 +1,8 @@
 # The development server is started with the command:
-# docker compose -f compose.develop.yml up -d
+# docker compose -f compose.develop.yml up --build
+# It builds the Dockerfile's dev stage (IPython, ipdb, gunicorn --reload, one worker) and
+# mounts ./app over /app, so a code change reloads the app without a rebuild. Rebuild after
+# a change to app/requirements*.txt or the Dockerfile. See README, "Development".
 
 services:
   nginx_nuki:
@@ -17,18 +20,23 @@ services:
 
   webapp_nuki:
     build:
+      context: .
       dockerfile: Dockerfile
+      target: dev
     container_name: webapp-nuki
     volumes:
-      - ./secrets/webapp_nuki_mdb-postgres.env:/app/secrets/mdb-postgres.env:ro
+      # The code. Not :ro, as the env file below is mounted inside it: docker creates the
+      # mount point app/secrets/.env.development in the checkout (ignored by .gitignore).
+      - ./app:/app
       - ./secrets/webapp_nuki.dev.env:/app/secrets/.env.development:ro
     ports:
       - 8050:8050
-    stdin_open: true # docker run -i
+    stdin_open: true # docker run -i: for ipdb, through docker attach webapp-nuki
     tty: true        # docker run -t
     environment:
       - APP_ENV=development
       - DASH_ASYNC_SUPPORT=0
+      - PYTHONDONTWRITEBYTECODE=1   # no __pycache__ in the mounted ./app
 
 
 # To (re)build images:       docker compose -f compose.develop.yml build
