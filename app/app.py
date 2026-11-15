@@ -2,7 +2,7 @@ import os
 # os.environ["DASH_ASYNC_SUPPORT"] = "0"
 
 from flask import Flask, request
-from dash import Dash, Input, Output, State, callback, dcc, html, no_update
+from dash import Dash, Input, Output, State, dcc, html, no_update
 import plotly.express as px
 import pandas as pd
 import dash_ag_grid as dag
@@ -52,7 +52,10 @@ app = Dash(__name__,
 app.layout = html.Div(
     [
         dcc.Store(id="catalogue"),
-        dbc.Row(dbc.Col(html.H1('Structural Health Monitoring Power Line Masts Kangerluarsuk Ungalleq'), width="auto")),
+        dbc.Row([dbc.Col(html.H1('Structural Health Monitoring Power Line Masts Kangerluarsuk Ungalleq'), width="auto"),
+                 # link to the phase 2 page (app/v2/), another Dash app on the same server: plain link
+                 dbc.Col(html.A("Try the new page (in development)", id="v2-link", href="/app/nuki/v2/"),
+                         width="auto", className="align-self-center")]),
         html.H5("Select the date range (YYYY/MM/DD)"),
         dbc.Row([dbc.Col(html.Div(dcc.DatePickerRange(id='date-range-picker',
                                              min_date_allowed=dt(2023, 1, 1),
@@ -286,7 +289,7 @@ def update_date_range(logger_value, catalogue):
     return r["start_date"], r["end_date"], r["min_date_allowed"], r["max_date_allowed"], r["end_date"]
 
 
-@callback(
+@app.callback(
     [Output("graph", "children"), Output("table", "rowData"), Output("table", "columnDefs")],
     [Input("logger", "value"), Input("date-range-picker", "start_date"), Input("date-range-picker", "end_date"),
      Input("catalogue", "data")],
@@ -372,6 +375,11 @@ def plot_no_values(message="No data returned...", ylabel="", title=""):
     )
 
     return fig
+
+
+# the phase 2 page (app/v2/) at /app/nuki/v2/, a second Dash app on the same Flask server
+import v2  # noqa: E402
+v2_app = v2.create_app(server)
 
 
 if __name__ == "__main__":

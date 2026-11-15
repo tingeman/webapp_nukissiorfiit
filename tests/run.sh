@@ -25,7 +25,8 @@
 #   an unreachable INFLUXDB_URL on a private --internal network, with the stub API (run with
 #   the image's python) as the backend in the production URL form
 #   (http://<host>/mdb/api/v1). It must become healthy (its own HEALTHCHECK), answer 200 on
-#   /app/nuki/, and the Dash callbacks (mast list, loggers, date range, data) must return the
+#   /app/nuki/ and on /app/nuki/v2/ (the phase 2 page, app/v2/), and the Dash callbacks (mast
+#   list, loggers, date range, data) of the classic page must return the
 #   masts, loggers and figures built from the stub data (tests/smoke_check.py, run in the
 #   container). One app container for all smoke tests.
 #
@@ -292,6 +293,7 @@ app_setup() {
       emit pid1 sh -c "tr \"\\0\" \" \" < /proc/1/cmdline"
       emit pid1uid stat -c %u /proc/1
       emit index python /tests/smoke_check.py index
+      emit v2index python /tests/smoke_check.py v2index
       emit callback python /tests/smoke_check.py callback' 2>&1 || true
     docker logs "$APP" 2>&1 | sed 's/^/log.out /'
   ) 2>&1)"
@@ -315,6 +317,11 @@ t_smoke_process() {
 t_smoke_index() {
   need_app
   expect "GET /app/nuki/ (${F[app.index.out]:-})" "${F[app.index.rc]:-}" "0"
+}
+
+t_smoke_v2_index() {
+  need_app
+  expect "GET /app/nuki/v2/ (${F[app.v2index.out]:-})" "${F[app.v2index.rc]:-}" "0"
 }
 
 t_smoke_callback() {
@@ -365,6 +372,7 @@ needs app
 add_test --slow "smoke: app with unreachable InfluxDB starts and becomes healthy" t_smoke_healthy
 add_test --slow "smoke: gunicorn is PID 1 as uid 30000, without --reload" t_smoke_process
 add_test --slow "smoke: GET /app/nuki/ returns 200 with the Dash page" t_smoke_index
+add_test --slow "smoke: GET /app/nuki/v2/ returns 200 with the phase 2 Dash page" t_smoke_v2_index
 add_test --slow "smoke: Dash callbacks return the masts, loggers, figures and table built from the stub API data" t_smoke_callback
 add_test --slow "smoke: app log has no traceback or data error" t_smoke_log
 

@@ -3,6 +3,8 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
 127.0.0.1:8050. Prints "OK <details>" and exits 0, or prints the problem and exits 1.
 
   index      GET /app/nuki/ returns 200 and the Dash page with the /app/nuki/ prefix
+  v2index    GET /app/nuki/v2/ returns 200 and the phase 2 Dash page with the /app/nuki/v2/
+             prefix (a second Dash app in the same gunicorn process)
   callback   POST /app/nuki/_dash-update-component for the callbacks of app.py in the order
              the page runs them, each fed with the previous answers: load_catalogue (masts of
              the stub API: Mast 6, Mast 9, Mast 13), update_loggers (Mast 6: 2 loggers,
@@ -114,21 +116,25 @@ def call(outputs, inputs, state=(), changed=None):
     return json.loads(body)["response"]
 
 
-def check_index():
+def check_index(url=BASE, expected_prefix="/app/nuki/"):
     try:
-        with urllib.request.urlopen(BASE, timeout=20) as r:
+        with urllib.request.urlopen(url, timeout=20) as r:
             status, body = r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
-        fail(f"GET {BASE}: HTTP {e.code}")
+        fail(f"GET {url}: HTTP {e.code}")
     if status != 200:
-        fail(f"GET {BASE}: HTTP {status}")
+        fail(f"GET {url}: HTTP {status}")
     m = re.search(r'<script id="_dash-config" type="application/json">(.*?)</script>', body, re.S)
     if not m:
-        fail(f"GET {BASE}: no _dash-config in the page: {body[:300]}")
+        fail(f"GET {url}: no _dash-config in the page: {body[:300]}")
     prefix = json.loads(m.group(1)).get("requests_pathname_prefix")
-    if prefix != "/app/nuki/":
-        fail(f"GET {BASE}: requests_pathname_prefix is {prefix!r}, expected '/app/nuki/'")
+    if prefix != expected_prefix:
+        fail(f"GET {url}: requests_pathname_prefix is {prefix!r}, expected {expected_prefix!r}")
     print(f"OK 200, {len(body)} bytes, prefix {prefix}")
+
+
+def check_v2_index():
+    check_index(BASE + "v2/", "/app/nuki/v2/")
 
 
 def load_catalogue():
@@ -207,5 +213,5 @@ def check_callback():
 
 
 if __name__ == "__main__":
-    {"index": check_index, "callback": check_callback}.get(
+    {"index": check_index, "v2index": check_v2_index, "callback": check_callback}.get(
         sys.argv[1] if len(sys.argv) > 1 else "", lambda: fail(__doc__))()
