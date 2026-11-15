@@ -6,7 +6,7 @@ Steps only you can do, in order. Each says whether you can do it **while the age
 
 The agent works in this checkout (`C:\thin\02_Code\python_web_apps\webapp_nukissiorfiit`), switches nothing but `agent-api-v2-phase2`, builds `webapp_nuki:local` and runs `tests/run.sh` (containers with `--network none`, no ports). It does not use compose, port 8050 or the project name `nuki`.
 
-## 1. T5: check phase 1 against the local backend (can run in parallel)
+## 1. T5: check phase 1 against the local backend (DONE 2026-11-15, results in STATUS)
 
 Don't run compose in this checkout while the agent works: `compose.develop.yml` mounts `./app` with `--reload`, so the agent's edits would land in your running app. Use a separate worktree of the phase 1 branch:
 
