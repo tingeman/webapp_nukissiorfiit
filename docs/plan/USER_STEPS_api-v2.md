@@ -8,7 +8,7 @@ All commands are for **WSL** (bash; Docker Desktop's `docker` works there). Ever
 
 ## Where you are, what to do next (2026-11-15)
 
-**Update 2026-11-15:** A-D done: `2026.3` is deployed and checked. **Left: E (step 5.5), this repo's `main` to `2026.3`.** Step 6 (T15) later, your decision.
+**Update 2026-11-15:** A-E done: `2026.3` is deployed and checked, `main` = `2026.3`. Only step 6 (T15) is left, later, your decision.
 
 Phase 1 (`2026.2`) is deployed. Phase 2 is tagged: `develop/main` = `agent-api-v2-phase2` = tag `2026.3` = `9a95a5a`, all pushed (steps 5.1, 5.2, done before steps 3 and 4). That is fine: the tag contains all phase 2 code; nothing has to be undone. **Nothing is built or deployed from it yet.** No agent is working; you can start now.
 
@@ -192,7 +192,7 @@ dtu_sus_web_server `docs/plan/USER_STEPS_api-v2.md`, steps 8, 9 and 10 (needs it
 
 ### 5.5 Fast-forward webapp_nukissiorfiit's `main` to `2026.3`
 
-- [ ] Done
+- [x] Done 2026-11-15 (`main` = `9a95a5a`, pushed)
 
 ```bash
 # WSL, webapp_nukissiorfiit
