@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released as 2026.2 (`655aa0a`, deploy by you). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T12 done; next T13 (docs) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released as 2026.2 (`655aa0a`, deploy by you). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; next: your review of `/app/nuki/v2/` (USER_STEPS step 4), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 
@@ -17,6 +17,8 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6
 - T5 2026-11-15 (you, local backend): 5 masts with the expected loggers; default ranges have data; inclination Roll/Pitch (Tekbox) and X/Y (Campbell); pressure about 100 kPa for both; 1-3 contiguous `/raw` chunks per update (a picker edit of start and end is 2 updates); backend paused: "Backend request timed out" after the read timeout, no retry and no second GET; nginx stopped: 2 connect retries, then "An unknown error occurred"; API time for one Tekbox year (Mast 6) 0.5-1.4 s, 27-33 KB gzip (plan estimate was about 1 MB: the real data is much sparser)
 - Phase 1 fix 2026-11-15 (on `agent-api-v2`, your request): an unreachable backend shows "Backend not reachable" (`BackendUnreachable`, a RuntimeError), logged without a traceback; phase 1 suite 103 passed (`655aa0a`), merged into the phase 2 branch (`3d547be`)
 - T10 2026-11-15: profile panel (`app/v2/profile.py`): day slider over every loaded day, Day min/max band, annual envelope via `trumpet.trumpet` on a 365-day window (TSP's 90 % rule), or both; compact `profile` store; day marker patched onto the figure; Full makes 1 raw then 1 daily request, in sequence; suite 217 passed (`af2206c`)
+- T13 2026-11-15: README section for the phase 2 page and `app/v2/` module map, TODO list updated; env template already complete (`16da232`)
+- Browser check 2026-11-15 (agent, image against the stub): page renders; fixed the profile graph overlapping the download card (graph created hidden kept height 0) and the wrapped slider tooltip; envelope, Full, All loggers and download not clicked through (screenshots timed out)
 - T12 2026-11-15: Excel download (`app/v2/download.py`, openpyxl 3.1.5 + et-xmlfile 2.0.0 locked): own year and logger selectors ("All" as a separate checklist), Info + full/daily sheets per logger, loggers in sequence with one deadline, button disabled while running (`running=`); `develop/main` (Dockerfile fix) merged in (`523b3a1`); suite 273 passed (`b23852a`)
 - T11 2026-11-15: All loggers (`app/v2/join.py`): join within one station by series, datatype, unit (and depth), each logger fetched for its own part of the range, one logger at a time, dashed change markers, Mast 9 stations in separate legend groups, profile per day from one station; suite 247 passed (`ed5a14e`)
 - T6 2026-11-15 (you): tag 2026.2 on `develop/main` (`655aa0a`), built and tested with build_image.sh (tarball e8c35fb0...), releases.yml updated
@@ -28,7 +30,7 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6
 
 - Full limit: implemented as "one year up to the end date" (365 or 366 days) instead of "366 days", so Full is always one raw request (a 366-day window over a non-leap year was 2 requests). Agent decision 2026-11-15, within the plan's intent; say if you want 366 days back.
 - Profile: the store (about 80 KB for 5 depths, 155 KB for 10, over 2 years) goes back to the server on every slider release, since the profile is drawn server-side (tested with trumpet.py). A clientside JS callback would avoid the upload and could follow the slider while dragging, but duplicates the envelope logic in JS without Python tests. Kept server-side; revisit if the slider feels slow on the server.
-- The v2 page has not been looked at by eye yet (tests only); see USER_STEPS step 4.
+- The v2 page was only partly looked at by eye (default load and profile); the rest is USER_STEPS step 4. Seen then: the day marker on the main figure is a full-day band that extends the x axis one day past the last daily point; consider a thin line instead.
 
 - monitoring_db: a site/group field for masts, and the inclinometer mounting orientation (plan, "Notes on the sensor definitions").
 
