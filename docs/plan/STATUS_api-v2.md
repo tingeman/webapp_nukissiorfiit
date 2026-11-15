@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released and deployed as 2026.2 (`655aa0a`) 2026-11-15; open: production checks, `main` fast-forward, nginx deploy (USER_STEPS steps 2c, 3). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; your review done 2026-11-15; next T16 (review fixes, implementer), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released and deployed as 2026.2 (`655aa0a`) 2026-11-15; open: production checks, `main` fast-forward, nginx deploy (USER_STEPS steps 2c, 3). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; T16 (your review fixes) done 2026-11-15; next: your second look at `/app/nuki/v2/` (USER_STEPS step 4), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 
@@ -17,6 +17,8 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6
 - T5 2026-11-15 (you, local backend): 5 masts with the expected loggers; default ranges have data; inclination Roll/Pitch (Tekbox) and X/Y (Campbell); pressure about 100 kPa for both; 1-3 contiguous `/raw` chunks per update (a picker edit of start and end is 2 updates); backend paused: "Backend request timed out" after the read timeout, no retry and no second GET; nginx stopped: 2 connect retries, then "An unknown error occurred"; API time for one Tekbox year (Mast 6) 0.5-1.4 s, 27-33 KB gzip (plan estimate was about 1 MB: the real data is much sparser)
 - Phase 1 fix 2026-11-15 (on `agent-api-v2`, your request): an unreachable backend shows "Backend not reachable" (`BackendUnreachable`, a RuntimeError), logged without a traceback; phase 1 suite 103 passed (`655aa0a`), merged into the phase 2 branch (`3d547be`)
 - T10 2026-11-15: profile panel (`app/v2/profile.py`): day slider over every loaded day, Day min/max band, annual envelope via `trumpet.trumpet` on a 365-day window (TSP's 90 % rule), or both; compact `profile` store; day marker patched onto the figure; Full makes 1 raw then 1 daily request, in sequence; suite 217 passed (`af2206c`)
+- T16 2026-11-15: review fixes 1-8: no daily bands, row titles daily mean / all measurements / thinned, dates on every row, live profile slider (clientside `profile.js`, envelope precomputed in numpy, tested against trumpet), zoom kept on the Daily/Full switch, pan/zoom in Full loads the visible window in the selected period, heading names the drawn data (failed load clears the figure), profile 2/3 + download 1/3, borders #b9c1ca; suite 296 passed (`90b95a5`)
+- tests/run.sh fix 2026-11-15 (`agent-fixes` `1bc0b9b`, merged into the phase 2 branch): `APP_SRC` copy leaves out `app/secrets/` (compose's mount point made the quick unit run fail); suite 103 passed on develop/main + fix
 - Dev-image fix 2026-11-15 (`agent-fixes` `50037ad`, merged into the phase 2 branch `48a68b0`; `develop/main` fast-forwarded to it with your permission, not pushed): the dev server hung for every page when the browser left an idle connection open (1 sync worker, `--timeout 0`, no nginx in front); now `--threads 4` (gthread). Reproduced and verified with an idle socket; suite 103 passed. Production unaffected (nginx in front, 4 workers, `--timeout 120`)
 - T13 2026-11-15: README section for the phase 2 page and `app/v2/` module map, TODO list updated; env template already complete (`16da232`)
 - Browser check 2026-11-15 (agent, image against the stub): page renders; fixed the profile graph overlapping the download card (graph created hidden kept height 0) and the wrapped slider tooltip; envelope, Full, All loggers and download not clicked through (screenshots timed out)
@@ -36,6 +38,8 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6
 - monitoring_db: a site/group field for masts, and the inclinometer mounting orientation (plan, "Notes on the sensor definitions").
 
 ## Notes for the next session
+
+- T16 notes: profile store 2 years x 10 depths about 209 KB (was 153 KB; now sent once per load, never uploaded); integer hundredths would save about 15 %. The day marker is still a full-day band. Not checked by eye: smooth dragging and the narrow (below lg) layout. Later (roadmap): a TSP-style trumpet card per hydrological year, once loggers have a full year of data.
 
 - Keep `BACKEND_API_BASE_URL` in the `/api/v1` form: dtu_sus_web_server's nuki playbook post-check requests `<BACKEND_API_BASE_URL>/metadata` and would fail with the root form. Its `InfluxDB health` post-check goes with R3.
 

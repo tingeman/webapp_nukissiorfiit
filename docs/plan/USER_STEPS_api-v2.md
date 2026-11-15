@@ -105,7 +105,7 @@ git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phase1   # --
 
 ## 4. Review phase 2
 
-- [ ] Done
+- [ ] Done (first look 2026-11-15: findings fixed in T16 `90b95a5`; second look open)
 
 Review the commits and the open questions in STATUS:
 
