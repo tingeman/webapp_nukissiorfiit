@@ -14,7 +14,7 @@ import unittest
 
 import openpyxl
 
-from support import ApiTestCase, config, fake_api
+from support import ApiTestCase, ManualThreads, config, fake_api
 from test_v2_page import CAMPBELL_M6, TEKBOX_M6, PageTestCase, text_of
 
 import app  # noqa: E402
@@ -60,8 +60,8 @@ class DownloadCase(ApiTestCase):
     def setUp(self):
         super().setUp()
         self.set_settings(backend_api_daily_chunk_years=3)
-        self.client = Client.from_settings(config.settings)
-        self.catalogue = self.client.masts()
+        self.client = Client.from_settings(config.settings, start_thread=ManualThreads())
+        self.catalogue = [self.client.mast(m["name"]) for m in self.client.masts()]
         self.server.requests.clear()
         self.server.max_in_flight = 0
 
@@ -343,12 +343,12 @@ class NamesTest(unittest.TestCase):
 class PageDownloadTest(PageTestCase):
     def setUp(self):
         super().setUp()
-        self.catalogue = self.masts()["masts"]["data"]
+        self.catalogue = self.catalogue_store()
         self.server.requests.clear()
 
     def ticks(self, inputs, changed):
         r = self.call([("download-loggers", "options"), ("download-loggers", "value"), ("download-all", "value")],
-                      inputs, state=[("masts", "data", self.catalogue)], changed=changed)
+                      inputs, state=[("mast", "value", "Mast 6")], changed=changed)
         return r["download-loggers"]["options"], r["download-loggers"]["value"], r["download-all"]["value"]
 
     def test_layout(self):
@@ -361,19 +361,19 @@ class PageDownloadTest(PageTestCase):
         self.assertEqual(by_id["download-all"].value, ["all"])
 
     def test_ticks(self):
-        """mast change: all loggers and "All" ticked; unticking a logger unticks "All"; "All" ticks every logger or none"""
+        """loggers arrive: all and "All" ticked; unticking one unticks "All"; "All" ticks all or none"""
         both = [TEKBOX_M6, CAMPBELL_M6]
-        opts, value, all_ = self.ticks([("mast", "value", "Mast 6"), ("download-all", "value", []),
-                                        ("download-loggers", "value", [])], "mast.value")
+        opts, value, all_ = self.ticks([("masts", "data", self.catalogue), ("download-all", "value", []),
+                                        ("download-loggers", "value", [])], "masts.data")
         self.assertEqual([o["value"] for o in opts], both)
         self.assertEqual((value, all_), (both, ["all"]))
-        _, value, all_ = self.ticks([("mast", "value", "Mast 6"), ("download-all", "value", ["all"]),
+        _, value, all_ = self.ticks([("masts", "data", self.catalogue), ("download-all", "value", ["all"]),
                                      ("download-loggers", "value", [CAMPBELL_M6])], "download-loggers.value")
         self.assertEqual((value, all_), ([CAMPBELL_M6], []))
-        _, value, all_ = self.ticks([("mast", "value", "Mast 6"), ("download-all", "value", ["all"]),
+        _, value, all_ = self.ticks([("masts", "data", self.catalogue), ("download-all", "value", ["all"]),
                                      ("download-loggers", "value", [CAMPBELL_M6])], "download-all.value")
         self.assertEqual((value, all_), (both, ["all"]))
-        _, value, all_ = self.ticks([("mast", "value", "Mast 6"), ("download-all", "value", []),
+        _, value, all_ = self.ticks([("masts", "data", self.catalogue), ("download-all", "value", []),
                                      ("download-loggers", "value", both)], "download-all.value")
         self.assertEqual((value, all_), ([], []))
         self.assertEqual(self.server.requests, [])

@@ -15,8 +15,9 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
              describes the values) and the ground temperature table; and without a logger,
              six "Select a mast and logger" figures
   v2callback POST /app/nuki/v2/_dash-update-component for the phase 2 page's callbacks in
-             the order the page runs them: load_masts (Mast 6, Mast 9, Mast 13), fill_loggers
-             (Mast 6: default the Campbell, the logger with the latest data), set_period (its
+             the order the page runs them: load_masts (Mast 6, Mast 9, Mast 13, without loggers),
+             fill_loggers (Mast 6: its loggers into the masts store, default the Campbell, the
+             logger with the latest data), set_period (its
              first..last day), load_data Daily (one figure: ground temperature, weather,
              pressure in kPa, the two angles, sensor temperature, battery; one line of
              daily means per series, no bands, date tick labels on every row; the heading
@@ -314,6 +315,16 @@ def v2_load(logger, start, end, resolution, masts=None):
     return fig, view, store
 
 
+def v2_fill_loggers(mast, masts):
+    """fill_loggers: the mast's loggers into the masts store, the logger options and value."""
+    outputs = v2_duplicate_outputs([("masts", "data"), ("logger", "options"), ("logger", "value"),
+                                    ("masts-message", "children")])
+    r = call(outputs, [("mast", "value", mast)], state=[("masts", "data", masts)], base=V2)
+    if "masts" not in r or r.get("masts-message", {}).get("children"):
+        fail(f"v2 {mast} loggers: {json.dumps(r)[:300]}")
+    return r
+
+
 def check_v2_profile():
     """The profile is drawn in the browser: the clientside callback is registered (inputs the
     slider, the envelope and the store) and its script is served."""
@@ -361,8 +372,10 @@ def check_v2_callback():
     names = [o["value"] for o in r["mast"]["options"]]
     if names != ["Mast 6", "Mast 9", "Mast 13"] or r["mast"]["value"] != "Mast 6":
         fail(f"v2 masts: options {names}, value {r['mast']['value']!r}, message {r['masts-message']['children']}")
-    r = v2_call([("logger", "options"), ("logger", "value")], [("mast", "value", "Mast 6")],
-                state=[("masts", "data", masts)])
+    if any("loggers" in m for m in masts):
+        fail(f"v2 masts: the mast list carries loggers: {json.dumps(masts)[:300]}")
+    r = v2_fill_loggers("Mast 6", masts)
+    masts = r["masts"]["data"]
     if r["logger"]["value"] != CAMPBELL_M6 or len(r["logger"]["options"]) != 3             or r["logger"]["options"][-1] != {"label": "All loggers", "value": "all:Mast 6"}:
         fail(f"v2 Mast 6 loggers: {r['logger']}")
     props = ["min_date_allowed", "max_date_allowed", "start_date", "end_date"]
@@ -404,10 +417,10 @@ def check_v2_download():
 
     r = v2_call([("masts", "data"), ("mast", "options"), ("mast", "value"), ("masts-message", "children")],
                 [("url", "pathname", "/app/nuki/v2/")])
-    masts = r["masts"]["data"]
+    masts = v2_fill_loggers("Mast 6", r["masts"]["data"])["masts"]["data"]
     r = v2_call([("download-loggers", "options"), ("download-loggers", "value"), ("download-all", "value")],
-                [("mast", "value", "Mast 6"), ("download-all", "value", []), ("download-loggers", "value", [])],
-                state=[("masts", "data", masts)])
+                [("masts", "data", masts), ("download-all", "value", []), ("download-loggers", "value", [])],
+                state=[("mast", "value", "Mast 6")])
     ticked = r["download-loggers"]["value"]
     if ticked != [TEKBOX_M6, CAMPBELL_M6] or r["download-all"]["value"] != ["all"]:
         fail(f"v2 download checklists: {r}")

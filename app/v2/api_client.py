@@ -5,7 +5,8 @@ timing) and the phase 1 db_connector.py (root URL, connect-only retries, the mas
 the column selection), which this module does not import.
 
     client = Client.from_settings(config.settings)
-    client.masts()                          -> the Nukissiorfiit masts and their loggers
+    client.masts()                          -> the Nukissiorfiit masts (v1 metadata only)
+    client.mast(name)                       -> one mast with its loggers (v2 metadata of its stations)
     default_logger(mast)                    -> the logger with the latest data
     client.daily(logger, start, end)        -> DailyResult (series: key -> DailySeries)
     client.raw(logger, start, end)          -> RawResult (series: key -> RawSeries)
@@ -21,8 +22,7 @@ technical cause. The client has then logged one WARNING with the reason. A 504 (
 statement timeout) and a read timeout fail after one request; only connection errors are
 retried (``BACKEND_API_MAX_RETRIES``), since such a request never reached the API.
 
-Requests: GET <root>/api/v1/metadata (cached 10 minutes), GET <root>/api/v2/metadata?station=
-(cached 10 minutes per station; failures are not cached), GET <root>/api/v2/measurements/daily
+Requests: GET <root>/api/v1/metadata, GET <root>/api/v2/metadata?station= (per station), GET <root>/api/v2/measurements/daily
 and .../raw with the logger's selector, ``start`` and ``end`` (no ``calibrated`` or
 ``include_masked``: the API's defaults apply). <root> is BACKEND_API_BASE_URL without a
 trailing "/", "/api/v1" or "/api/v2" (one WARNING when a suffix is stripped).
@@ -40,8 +40,26 @@ API (sensor_name, timeseries_name, datatype, unit, relative_z, ...) and numpy ar
 ``time`` (datetime64[ms], UTC) and ``value`` (float); daily ``time`` (datetime64[D]) and
 ``mean``/``min``/``max`` (float) and ``count`` (int). Only points with data are kept.
 
-Nothing but plain attributes and a lock is created in the constructor: gunicorn imports the app
-with --preload and then forks, so sessions and thread pools are made per call.
+Metadata cache (T17): per Client, per key (v1; v2 per station). An entry younger than
+METADATA_TTL_S (10 min) is served as it is; an older one is served as it is too, and a
+background refresh of it is queued (stale-while-revalidate); a missing one is fetched at once
+(the caller waits; errors raise ApiError; failures are not cached). A request for a key that
+is already running is waited for, not sent twice.
+
+Background worker: one thread per Client at most, started when something is queued and none
+runs (never at import or construction: gunicorn imports the app with --preload and forks),
+stopped when its queue is empty. It sends the queued metadata requests one at a time (never
+two at once), skipping keys that became fresh. Queued are: stale entries (by _cached) and,
+when the mast list or a mast's loggers are served, the v2 metadata of every included station
+that is not fresh (warm_up), so another mast is instant and masts() can leave out masts
+without data. A failed background request keeps the old entry, logs one WARNING and empties
+the queue (the next page request queues again). Requests are only started by page requests:
+an idle worker process makes none. ``start_thread(target)`` (default: a daemon thread) can be
+replaced, e.g. by tests that run the worker themselves; it must not run ``target`` before it
+returns. ``wait_background(timeout)`` waits for the worker to stop.
+
+Nothing but plain attributes, a lock and its condition is created in the constructor; sessions
+and thread pools are made per call.
 """
 from __future__ import annotations
 
@@ -285,11 +303,26 @@ def _daily_series(payloads) -> dict:
 
 # ---- client ---------------------------------------------------------------------------------
 
+def _start_daemon(target):
+    """The default ``start_thread`` of a Client: ``target`` in a new daemon thread."""
+    threading.Thread(target=target, name="mdb-metadata", daemon=True).start()
+
+
+_V1 = ("v1",)       # metadata cache key of /api/v1/metadata; ("v2", station) for /api/v2/metadata
+
+
+def _request_of(key):
+    """(log name, path, params) of a metadata cache key."""
+    if key == _V1:
+        return "metadata", "/api/v1/metadata", None
+    return "v2 metadata", "/api/v2/metadata", {"station": key[1]}
+
+
 class Client:
     def __init__(self, base_url: str, timeout_s: float = 30.0, max_retries: int = 2,
                  backoff_factor: float = 0.5, max_parallel: int = 2, daily_chunk_years: int = 3,
                  raw_chunk_years: int = 1, station_pattern: str = r"^(SIS2024-0[1-5]|NUKI202[0-9]-.+)$",
-                 clock=time.monotonic):
+                 clock=time.monotonic, start_thread=None):
         self.base_url, stripped = root_url(base_url)
         if stripped:
             logger.warning("BACKEND_API_BASE_URL %s ends with an API version; using the root %s "
@@ -302,21 +335,26 @@ class Client:
         self.raw_chunk_years = raw_chunk_years
         self.station_regex = re.compile(station_pattern)
         self._clock = clock
+        # how the background worker is started: start_thread(target) (default: a daemon
+        # thread, created when first needed, never here: gunicorn forks after the import)
+        self._start_thread = start_thread or _start_daemon
         self._lock = threading.Lock()
-        self._v1_metadata = None        # (clock time, JSON)
-        self._v2_metadata = {}          # station identifier -> (clock time, JSON)
+        self._idle = threading.Condition(self._lock)    # notified when the worker stops
+        self._cache = {}                # metadata key (_V1 or ("v2", station)) -> (clock time, JSON)
+        self._fetching = {}             # metadata key -> threading.Event, while a request for it runs
+        self._queue = []                # metadata keys for the background worker, in order
+        self._worker = False            # the background worker is started and not yet stopped
 
     @classmethod
-    def from_settings(cls, settings) -> "Client":
+    def from_settings(cls, settings, **kwargs) -> "Client":
         return cls(settings.backend_api_base_url, settings.backend_api_timeout_seconds,
                    settings.backend_api_max_retries, settings.backend_api_backoff_factor,
                    settings.backend_api_max_parallel, settings.backend_api_daily_chunk_years,
-                   settings.backend_api_raw_chunk_years, settings.nuki_station_pattern)
+                   settings.backend_api_raw_chunk_years, settings.nuki_station_pattern, **kwargs)
 
     def clear_cache(self):
         with self._lock:
-            self._v1_metadata = None
-            self._v2_metadata.clear()
+            self._cache.clear()
 
     def deadline_in(self, seconds: float) -> float:
         """A deadline for daily()/raw(), ``seconds`` from now (on the client's clock)."""
@@ -370,73 +408,198 @@ class Client:
             raise ApiError(texts.API_INVALID, f"JSON {type(data).__name__}, not an object")
         return data, seconds, len(body)
 
-    # ---- metadata ----
+    # ---- metadata cache (stale-while-revalidate) and the background worker ----
 
-    def _cached(self, what: str, get_hit, put, path: str, params: dict | None):
-        with self._lock:
-            hit = get_hit()
-            if hit is not None and self._clock() - hit[0] < METADATA_TTL_S:
-                return hit[1]
+    def _fresh(self, key) -> bool:
+        """The key has a cache entry younger than METADATA_TTL_S (call with the lock held)."""
+        hit = self._cache.get(key)
+        return hit is not None and self._clock() - hit[0] < METADATA_TTL_S
+
+    def _request(self, key, background=False):
+        """One metadata request for ``key``; the answer goes into the cache. Raises ApiError
+        after one WARNING (a background refresh: the cached entry, if any, is kept)."""
+        what, path, params = _request_of(key)
         try:
-            data, seconds, size = self._get(path, params)      # outside the lock
+            data, seconds, size = self._get(path, params)
         except ApiError as e:
-            logger.warning("API %s failed: %s (%s%s %s)", what, e.reason, self.base_url, path, params or "")
+            logger.warning("API %s %sfailed: %s (%s%s %s)", what, "refresh " if background else "",
+                           e.reason, self.base_url, path, params or "")
             raise
-        logger.info("API %s: %.2f s, %d bytes", what, seconds, size)
+        logger.info("API %s%s: %.2f s, %d bytes", what, " (background)" if background else "", seconds, size)
         with self._lock:
-            put((self._clock(), data))
+            self._cache[key] = (self._clock(), data)
         return data
 
+    def _cached(self, key):
+        """The metadata of ``key``: a cache entry younger than 10 minutes as it is; an older
+        one as it is too, with a background refresh queued (stale-while-revalidate); none:
+        fetched now (raises ApiError; failures are not cached). A request for the key already
+        running (the background worker) is waited for instead of sent twice."""
+        while True:
+            with self._lock:
+                hit = self._cache.get(key)
+                if hit is not None:
+                    if not self._fresh(key):
+                        self._enqueue([key])
+                    return hit[1]
+                running = self._fetching.get(key)
+                if running is None:
+                    done = self._fetching[key] = threading.Event()
+                    break
+            running.wait()      # the request has a timeout; then the cache has it, or not
+        try:
+            return self._request(key)
+        finally:
+            with self._lock:
+                self._fetching.pop(key, None)
+            done.set()
+
+    def _enqueue(self, keys):
+        """Queue metadata keys for the background worker (each at most once, none that is
+        being fetched) and start the worker if it is not running (call with the lock held)."""
+        for key in keys:
+            if key not in self._queue and key not in self._fetching:
+                self._queue.append(key)
+        if self._queue and not self._worker:
+            self._worker = True
+            try:
+                self._start_thread(self._work)
+            except Exception as e:  # noqa: BLE001  (e.g. no thread available: serve without)
+                self._worker = False
+                self._queue.clear()
+                logger.warning("API metadata: background worker not started: %s: %s", type(e).__name__, e)
+
+    def _work(self):
+        """The background worker: the queued keys one at a time (never two of its requests at
+        once), each unless it is fresh or fetched by a request meanwhile. A failure keeps the
+        cached entry (one WARNING) and drops the rest of the queue: the next page request
+        queues them again. Stops when the queue is empty."""
+        while True:
+            with self._lock:
+                key = None
+                while self._queue:
+                    candidate = self._queue.pop(0)
+                    if candidate not in self._fetching and not self._fresh(candidate):
+                        key = candidate
+                        break
+                if key is None:
+                    self._worker = False
+                    self._idle.notify_all()
+                    return
+                done = self._fetching[key] = threading.Event()
+            try:
+                self._request(key, background=True)
+            except Exception as e:      # noqa: BLE001  (ApiError is logged; nothing may kill the worker silently)
+                if not isinstance(e, ApiError):
+                    logger.exception("API metadata background request %s failed", key)
+                with self._lock:
+                    self._queue.clear()
+            finally:
+                with self._lock:
+                    self._fetching.pop(key, None)
+                done.set()
+
+    def wait_background(self, timeout: float | None = None) -> bool:
+        """Wait until the background worker has stopped (True), or ``timeout`` seconds (False)."""
+        with self._idle:
+            return self._idle.wait_for(lambda: not self._worker, timeout)
+
+    def warm_up(self):
+        """Queue the v2 metadata of every included station that is not fresh in the cache for
+        the background worker (from the cached v1 metadata; nothing without it), in mast
+        order. Never waits for a request."""
+        with self._lock:
+            hit = self._cache.get(_V1)
+            if hit is None:
+                return
+            try:
+                groups = self._groups(hit[1])
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return
+            keys = [("v2", ident) for _label, idents in sorted(groups.items(), key=lambda g: _mast_sort_key(g[0]))
+                    for ident in idents]
+            self._enqueue([k for k in keys if not self._fresh(k)])
+
     def metadata_v1(self) -> dict:
-        """GET /api/v1/metadata (whole database), cached for 10 minutes (failures are not)."""
-        return self._cached("metadata", lambda: self._v1_metadata,
-                            lambda v: setattr(self, "_v1_metadata", v), "/api/v1/metadata", None)
+        """GET /api/v1/metadata (whole database), cached for 10 minutes (stale-while-revalidate
+        after that; failures are not cached)."""
+        return self._cached(_V1)
 
     def metadata_v2(self, station: str) -> dict:
-        """GET /api/v2/metadata?station=<identifier>, cached per station for 10 minutes."""
-        return self._cached("v2 metadata", lambda: self._v2_metadata.get(station),
-                            lambda v: self._v2_metadata.__setitem__(station, v),
-                            "/api/v2/metadata", {"station": station})
+        """GET /api/v2/metadata?station=<identifier>, cached per station as metadata_v1."""
+        return self._cached(("v2", station))
+
+    # ---- mast catalogue ----
+
+    def _groups(self, meta: dict) -> dict:
+        """{mast label: [station identifiers]} of the v1 metadata: the stations whose
+        identifier fully matches NUKI_STATION_PATTERN, grouped by station name."""
+        groups: dict = {}
+        for station in meta.get("stations") or []:
+            ident = station.get("identifier")
+            if not ident or not self.station_regex.fullmatch(ident):
+                continue
+            groups.setdefault(_mast_label(station.get("name") or ident), []).append(ident)
+        return groups
+
+    def _known_empty(self, idents) -> bool:
+        """Every station's v2 metadata is cached (of any age) and has no logger with data."""
+        with self._lock:
+            hits = [self._cache.get(("v2", ident)) for ident in idents]
+        if any(hit is None for hit in hits):
+            return False
+        try:
+            return not any(_station_loggers(ident, hit[1]) for ident, hit in zip(idents, hits))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return False        # unknown: shown (its logger request will say what is wrong)
 
     def masts(self) -> list:
-        """The Nukissiorfiit masts with their loggers, sorted by mast number:
+        """The Nukissiorfiit masts, from /api/v1/metadata alone, sorted by mast number:
 
-            [{"name": "Mast 6", "station_identifiers": ["SIS2024-01"],
-              "loggers": [{"value": "deveui:..." | "serial:<station>:<serial>",
-                           "label": "<display name> (<serial or deveui>), <first> to <last>",
-                           "station": "<identifier>",
-                           "first": "YYYY-MM-DDTHH:MM:SSZ", "last": "YYYY-MM-DDTHH:MM:SSZ"}, ...]}]
+            [{"name": "Mast 6", "station_identifiers": ["SIS2024-01"]}, ...]
 
-        Stations: identifier fully matches NUKI_STATION_PATTERN, grouped by station name.
-        Loggers (by first measurement) come from the v2 metadata of each station; loggers
-        without measurements, and masts without such a logger, are left out. Raises ApiError."""
+        Stations: identifier fully matches NUKI_STATION_PATTERN, grouped by station name. A
+        mast is left out only when the cached v2 metadata of all its stations is known to
+        have no logger with data (this never asks for v2 metadata). Queues the background
+        warm-up of the stations' v2 metadata (warm_up). Raises ApiError."""
         meta = self.metadata_v1()
         try:
-            groups: dict = {}
-            for station in meta.get("stations") or []:
-                ident = station.get("identifier")
-                if not ident or not self.station_regex.fullmatch(ident):
-                    continue
-                groups.setdefault(station.get("name") or ident, []).append(ident)
-            masts = []
-            for name, idents in groups.items():
-                loggers = []
-                for ident in idents:
-                    for device in self.metadata_v2(ident).get("recording_devices") or []:
-                        if not device.get("last_measurement_time"):
-                            continue
-                        entry = _logger_entry(ident, device)
-                        if entry is not None:
-                            loggers.append(entry)
-                if not loggers:
-                    continue
-                loggers.sort(key=lambda lg: (lg["first"] or "", lg["value"]))
-                masts.append({"name": _mast_label(name), "station_identifiers": idents, "loggers": loggers})
+            groups = self._groups(meta)
         except (KeyError, TypeError, ValueError, AttributeError) as e:
             logger.warning("API metadata has an unexpected shape: %s: %s", type(e).__name__, e)
             raise ApiError(texts.API_INVALID, f"metadata shape: {e}") from None
+        masts = [{"name": label, "station_identifiers": idents} for label, idents in groups.items()
+                 if not self._known_empty(idents)]
         masts.sort(key=lambda m: _mast_sort_key(m["name"]))
+        self.warm_up()
         return masts
+
+    def mast(self, name: str):
+        """One mast of masts() with its loggers, or None for an unknown name:
+
+            {"name": "Mast 6", "station_identifiers": ["SIS2024-01"],
+             "loggers": [{"value": "deveui:..." | "serial:<station>:<serial>",
+                          "label": "<display name> (<serial or deveui>), <first> to <last>",
+                          "station": "<identifier>",
+                          "first": "YYYY-MM-DDTHH:MM:SSZ", "last": "YYYY-MM-DDTHH:MM:SSZ"}, ...]}
+
+        Loggers (by first measurement) come from the v2 metadata of the mast's stations only
+        (1, or 2 for Mast 9); loggers without measurements are left out. Then queues the
+        background warm-up of the other stations. Raises ApiError."""
+        meta = self.metadata_v1()
+        try:
+            idents = self._groups(meta).get(name)
+            if idents is None:
+                return None
+            loggers = []
+            for ident in idents:
+                loggers += _station_loggers(ident, self.metadata_v2(ident))
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
+            logger.warning("API metadata has an unexpected shape: %s: %s", type(e).__name__, e)
+            raise ApiError(texts.API_INVALID, f"metadata shape: {e}") from None
+        loggers.sort(key=lambda lg: (lg["first"] or "", lg["value"]))
+        self.warm_up()
+        return {"name": name, "station_identifiers": idents, "loggers": loggers}
 
     # ---- measurements ----
 
@@ -552,6 +715,18 @@ def _logger_entry(station: str, device: dict):
     display = device.get("display_name") or "Logger"
     label = f"{display} ({ident}), {(first or '')[:10]} to {last[:10]}"
     return {"value": value, "label": label, "station": station, "first": first, "last": last}
+
+
+def _station_loggers(station: str, meta: dict) -> list:
+    """The logger entries of one station's v2 metadata: devices with measurements only."""
+    out = []
+    for device in meta.get("recording_devices") or []:
+        if not device.get("last_measurement_time"):
+            continue
+        entry = _logger_entry(station, device)
+        if entry is not None:
+            out.append(entry)
+    return out
 
 
 def default_logger(mast: dict):

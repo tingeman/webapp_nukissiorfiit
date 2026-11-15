@@ -84,3 +84,23 @@ def closed_port():
     port = sock.getsockname()[1]
     sock.close()
     return port
+
+
+class ManualThreads:
+    """A ``start_thread`` for api_client.Client that starts nothing: the background worker's
+    target is kept until the test runs it with run() (in the test's thread, so the requests
+    it makes are deterministic)."""
+
+    def __init__(self):
+        self.targets = []
+
+    def __call__(self, target):
+        self.targets.append(target)
+
+    def run(self):
+        """Run the kept targets (and any started meanwhile); returns how many ran."""
+        n = 0
+        while self.targets:
+            self.targets.pop(0)()
+            n += 1
+        return n

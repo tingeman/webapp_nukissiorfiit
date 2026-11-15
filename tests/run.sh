@@ -191,10 +191,13 @@ unit_names() {
 # The selected unit tests in one container; counts and prints their PASS/FAIL lines. A
 # selected test without a result line counts as failed.
 run_unit() {   # run_unit <name>...
-  local out rc=0 line name nl=$'\n'
+  local out rc=0 line name nl=$'\n' args=("$@")
+  # every unit test selected: no names (run_unit.py then runs all), so the command line stays
+  # short (Windows limits it to 32 KB, which the names of all the tests exceed)
+  [ "$#" -ne "$(unit_names | wc -l)" ] || args=()
   out="$(docker run --rm --network none --name "$PFX-unit" -e PYTHONDONTWRITEBYTECODE=1 "${ENV_MOUNT[@]}" \
     -v "$(hp "$TESTS_DIR"):/tests:ro" "${SRC_MOUNT[@]}" "$IMAGE" "${SRC_WRAP[@]}" \
-    python /tests/unit/run_unit.py "$@" 2>&1)" || rc=$?
+    python /tests/unit/run_unit.py ${args[@]+"${args[@]}"} 2>&1)" || rc=$?
   while IFS= read -r line; do
     case "$line" in
       "PASS: "*) PASSED=$((PASSED + 1)); echo "$line" ;;

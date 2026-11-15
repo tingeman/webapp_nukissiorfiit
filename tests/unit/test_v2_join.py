@@ -9,7 +9,7 @@ import unittest
 
 import numpy as np
 
-from support import ApiTestCase, config
+from support import ApiTestCase, ManualThreads, config
 
 from test_v2_profile import assert_envelope_as_trumpet  # noqa: E402
 from v2 import api_client, figures, join, profile, texts  # noqa: E402
@@ -45,8 +45,8 @@ class StubJoinCase(ApiTestCase):
     def setUp(self):
         super().setUp()
         self.set_settings(backend_api_daily_chunk_years=3)
-        self.client = Client.from_settings(config.settings)
-        self.masts = {m["name"]: m for m in self.client.masts()}
+        self.client = Client.from_settings(config.settings, start_thread=ManualThreads())
+        self.masts = {m["name"]: self.client.mast(m["name"]) for m in self.client.masts()}
 
     def parts(self, mast, kind="daily", start="2024-01-01", end="2026-10-05"):
         fetch = getattr(self.client, kind)

@@ -6,8 +6,9 @@ Component ids (used by callbacks.py and the tests):
 
     classic-link     link back to the classic page (/app/nuki/)
     url              page location; its first render loads the mast catalogue
-    masts            dcc.Store: the catalogue (api_client.Client.masts())
-    masts-message    problem with the mast list
+    masts            dcc.Store: the mast list (api_client.Client.masts()); a mast gets its
+                     "loggers" (Client.mast()) when it is chosen
+    masts-message    problem with the mast list or the chosen mast's loggers
     mast, logger     dropdowns (logger default: the one with the latest data; "All loggers",
                      value "all:<mast>", is the last option of a mast with 2 or more)
     period           DatePickerRange: limits and default = the logger's first..last day;

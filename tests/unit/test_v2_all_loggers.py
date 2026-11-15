@@ -34,13 +34,12 @@ def selector(params):
 class AllLoggersCase(PageTestCase):
     def setUp(self):
         super().setUp()
-        self.catalogue = self.masts()["masts"]["data"]
+        self.catalogue = self.catalogue_store()
         self.server.requests.clear()
         self.server.max_in_flight = 0
 
     def loggers(self, mast):
-        r = self.call([("logger", "options"), ("logger", "value")], [("mast", "value", mast)],
-                      state=[("masts", "data", self.catalogue)])
+        r = self.fill_loggers(mast, self.catalogue)
         return r["logger"]["options"], r["logger"]["value"]
 
     def load_mast(self, value, start, end, resolution="daily"):

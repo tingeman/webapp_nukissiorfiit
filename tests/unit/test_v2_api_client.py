@@ -15,7 +15,7 @@ from unittest import mock
 import numpy as np
 import pydantic
 
-from support import APP_DIR, ApiTestCase, closed_port, config, fake_api, silent_port
+from support import APP_DIR, ApiTestCase, ManualThreads, closed_port, config, fake_api, silent_port
 from v2 import api_client, rawseries, texts, trumpet
 from v2.api_client import ApiError, Client
 
@@ -41,7 +41,14 @@ class ClientTestCase(ApiTestCase):
     def setUp(self):
         super().setUp()
         self.set_settings(backend_api_daily_chunk_years=3)
-        self.client = Client.from_settings(config.settings)
+        self.background = ManualThreads()       # the background worker runs only when a test says so
+        self.client = Client.from_settings(config.settings, start_thread=self.background)
+
+    def threaded(self, **kwargs):
+        """A client on the stub with real background threads, waited for at the end of the test."""
+        c = Client(self.root_url, **kwargs)
+        self.addCleanup(c.wait_background, 10)
+        return c
 
     def counting(self, delay=0.0, delays=None):
         """Patch client._get: counts the requests in flight (self.peak) and sleeps a while."""
@@ -265,15 +272,20 @@ class MetadataCacheTest(ClientTestCase):
         self.assertEqual([p for p, _ in self.server.requests], ["/mdb/api/v1/metadata"])
 
     def test_expiry(self):
-        """the v1 and v2 metadata caches expire after 10 minutes"""
+        """metadata cached 10 min; then served stale and refreshed in the background"""
         now = [1000.0]
-        c = Client(self.root_url, clock=lambda: now[0])
-        c.metadata_v1(), c.metadata_v2("SIS2024-01")
+        c = Client(self.root_url, clock=lambda: now[0], start_thread=self.background)
+        a = c.metadata_v1(), c.metadata_v2("SIS2024-01")
         now[0] += 599
         c.metadata_v1(), c.metadata_v2("SIS2024-01")
         now[0] += 2
-        c.metadata_v1(), c.metadata_v2("SIS2024-01")
+        self.assertEqual((c.metadata_v1(), c.metadata_v2("SIS2024-01")), a)     # stale, served as it is
+        self.assertEqual((len(self.api_requests("v1/metadata")), len(self.api_requests("v2/metadata"))), (1, 1))
+        self.assertEqual(self.background.run(), 1)
         self.assertEqual((len(self.api_requests("v1/metadata")), len(self.api_requests("v2/metadata"))), (2, 2))
+        c.metadata_v1(), c.metadata_v2("SIS2024-01")        # fresh again
+        self.assertEqual(self.background.run(), 0)
+        self.assertEqual(len(self.server.requests), 4)
 
     def test_failure_not_cached(self):
         """a failed metadata request is not cached (one WARNING): the next call asks again"""
@@ -296,29 +308,28 @@ class MetadataCacheTest(ClientTestCase):
         self.assertEqual([s["identifier"] for s in a["stations"]], ["SIS2024-01"])
 
     def test_masts_cached(self):
-        """a second masts() call makes no request; clear_cache() empties both caches"""
+        """masts() asks /v1/metadata once; clear_cache() empties the cache"""
         self.client.masts()
-        n = len(self.server.requests)
         self.client.masts()
-        self.assertEqual((len(self.server.requests), n), (n, 1 + 4))   # v1 + v2 of the 4 included stations
+        self.assertEqual([p for p, _ in self.server.requests], ["/mdb/api/v1/metadata"])
         self.client.clear_cache()
         self.client.masts()
-        self.assertEqual(len(self.server.requests), 2 * n)
+        self.assertEqual(len(self.server.requests), 2)
 
 
 class CatalogueTest(ClientTestCase):
     def test_masts(self):
-        """the catalogue lists Mast 6, 9 and 13 (numeric order), not QAA2017-01 or SIS2024-07"""
+        """masts(): Mast 6, 9, 13 (not QAA2017-01, SIS2024-07) from /v1/metadata alone, no loggers"""
         masts = self.client.masts()
         self.assertEqual([m["name"] for m in masts], ["Mast 6", "Mast 9", "Mast 13"])
         idents = [i for m in masts for i in m["station_identifiers"]]
         self.assertFalse({"QAA2017-01", "SIS2024-07"} & set(idents))
-        self.assertEqual({s["station"] for s in self.api_requests("v2/metadata")},
-                         {"SIS2024-01", "SIS2024-03", "NUKI2026-M9", "SIS2024-05"})
+        self.assertTrue(all("loggers" not in m for m in masts))
+        self.assertEqual([p for p, _ in self.server.requests], ["/mdb/api/v1/metadata"])
 
     def test_mast6(self):
-        """Mast 6 has the Tekbox (deveui) and the Campbell (station and serial), by first measurement"""
-        mast = self.client.masts()[0]
+        """mast(): Mast 6 has the Tekbox (deveui) and the Campbell (serial), from its station's v2 only"""
+        mast = self.client.mast("Mast 6")
         self.assertEqual(mast["station_identifiers"], ["SIS2024-01"])
         self.assertEqual(mast["loggers"], [
             {"value": TEKBOX_M6, "label": "Tekbox_TBSL1_3 (feedbeefcafe0002), 2026-09-01 to 2026-09-05",
@@ -326,47 +337,217 @@ class CatalogueTest(ClientTestCase):
             {"value": CAMPBELL_M6, "label": "CR300_M6 (12096), 2026-10-01 to 2026-10-05",
              "station": "SIS2024-01", "first": "2026-10-01T00:00:00Z", "last": "2026-10-05T00:00:00Z"},
         ])
+        self.assertEqual(self.api_requests("v2/metadata"), [{"station": "SIS2024-01"}])
 
     def test_mast9_two_stations(self):
-        """Mast 9 groups SIS2024-03 (Tekbox) and NUKI2026-M9 (Campbell) by station name"""
-        mast = self.client.masts()[1]
+        """Mast 9 groups SIS2024-03 (Tekbox) and NUKI2026-M9 (Campbell): loggers from both"""
+        mast = self.client.mast("Mast 9")
         self.assertEqual(sorted(mast["station_identifiers"]), ["NUKI2026-M9", "SIS2024-03"])
         self.assertEqual([lg["value"] for lg in mast["loggers"]], [TEKBOX_M9, "serial:NUKI2026-M9:12215"])
         self.assertEqual([lg["station"] for lg in mast["loggers"]], ["SIS2024-03", "NUKI2026-M9"])
+        self.assertEqual(sorted(p["station"] for p in self.api_requests("v2/metadata")), ["NUKI2026-M9", "SIS2024-03"])
 
     def test_mast13_without_tekbox(self):
         """Mast 13 has only CR300_M13: the Tekbox without measurements is left out"""
-        mast = self.client.masts()[2]
+        mast = self.client.mast("Mast 13")
         self.assertEqual([lg["value"] for lg in mast["loggers"]], ["serial:SIS2024-05:12216"])
         self.assertTrue(mast["loggers"][0]["label"].startswith("CR300_M13 (12216), "))
 
+    def test_unknown_mast(self):
+        """mast() of an unknown name is None, no v2 request"""
+        self.assertIsNone(self.client.mast("Mast 99"))
+        self.assertIsNone(self.client.mast("Qaanaaq borehole 1"))     # not matched by the pattern
+        self.assertEqual(self.api_requests("v2/metadata"), [])
+
     def test_custom_pattern(self):
         """a custom station pattern applies (fullmatch); a mast name without the prefix is kept"""
-        c = Client(self.root_url, station_pattern=r"QAA\d{4}-01")
-        masts = c.masts()
-        self.assertEqual([m["name"] for m in masts], ["Qaanaaq borehole 1"])
-        self.assertEqual([lg["value"] for lg in masts[0]["loggers"]], ["serial:QAA2017-01:A522C6"])
-        self.assertEqual(Client(self.root_url, station_pattern="SIS2024-0").masts(), [])
+        c = Client(self.root_url, station_pattern=r"QAA\d{4}-01", start_thread=ManualThreads())
+        self.assertEqual(c.masts(), [{"name": "Qaanaaq borehole 1", "station_identifiers": ["QAA2017-01"]}])
+        self.assertEqual([lg["value"] for lg in c.mast("Qaanaaq borehole 1")["loggers"]], ["serial:QAA2017-01:A522C6"])
+        self.assertEqual(Client(self.root_url, station_pattern="SIS2024-0", start_thread=ManualThreads()).masts(), [])
 
     def test_mast_without_data(self):
-        """a mast whose loggers have no measurements is left out"""
+        """a mast without data is listed until its v2 metadata is cached, then left out (also stale)"""
         self.server.fixtures["measurements"] = {k: v for k, v in self.server.fixtures["measurements"].items()
                                                 if not str(k).startswith("41")}
-        self.assertEqual(Client(self.root_url, station_pattern="SIS2024-05").masts(), [])
+        now = [1000.0]
+        background = ManualThreads()
+        c = Client(self.root_url, station_pattern="SIS2024-0[15]", clock=lambda: now[0], start_thread=background)
+        self.assertEqual([m["name"] for m in c.masts()], ["Mast 6", "Mast 13"])     # not known yet
+        self.assertEqual(self.api_requests("v2/metadata"), [])
+        self.assertEqual(c.mast("Mast 13")["loggers"], [])
+        self.assertEqual([m["name"] for m in c.masts()], ["Mast 6"])
+        now[0] += 601                                           # stale: still known to be empty
+        self.assertEqual([m["name"] for m in c.masts()], ["Mast 6"])
+        n = len(self.server.requests)
+        background.run()                    # the refreshes (v1, both stations), one at a time
+        self.assertEqual(len(self.server.requests), n + 3)
+
+    def test_mast_hidden_after_warm_up(self):
+        """after the warm-up the mast list leaves out a mast without data"""
+        self.server.fixtures["measurements"] = {k: v for k, v in self.server.fixtures["measurements"].items()
+                                                if not str(k).startswith("41")}
+        self.assertEqual([m["name"] for m in self.client.masts()], ["Mast 6", "Mast 9", "Mast 13"])
+        self.background.run()
+        self.assertEqual([m["name"] for m in self.client.masts()], ["Mast 6", "Mast 9"])
 
     def test_default_logger(self):
         """default_logger is the logger with the latest last measurement"""
-        masts = self.client.masts()
+        masts = [self.client.mast(m["name"]) for m in self.client.masts()]
         self.assertEqual([api_client.default_logger(m)["value"] for m in masts],
                          [CAMPBELL_M6, "serial:NUKI2026-M9:12215", "serial:SIS2024-05:12216"])
         self.assertIsNone(api_client.default_logger({"loggers": []}))
+        self.assertIsNone(api_client.default_logger({"name": "Mast 6"}))
 
     def test_bad_metadata(self):
-        """metadata of an unexpected shape fails with the invalid text"""
+        """metadata of an unexpected shape (v1 or v2) fails with the invalid text"""
+        self.server.force_if = ({"path": "/v2/metadata"}, (200, {"recording_devices": "nope"}))
+        with self.assertLogs("nuki.v2.api", level="WARNING"), self.assertRaises(ApiError) as cm:
+            self.client.mast("Mast 6")
+        self.assertEqual(str(cm.exception), texts.API_INVALID)
         self.server.force = (200, {"stations": "nope"})
+        self.client.clear_cache()
         with self.assertLogs("nuki.v2.api", level="WARNING"), self.assertRaises(ApiError) as cm:
             self.client.masts()
         self.assertEqual(str(cm.exception), texts.API_INVALID)
+
+
+# ---- background warm-up and stale-while-revalidate (T17) ---------------------------------------
+
+def metadata_threads():
+    return [t for t in threading.enumerate() if t.name == "mdb-metadata"]
+
+
+class BackgroundTest(ClientTestCase):
+    def test_no_thread_at_construction(self):
+        """no thread at construction or for a missing entry; masts() starts one that stops"""
+        before = metadata_threads()
+        c = self.threaded()
+        c.metadata_v1()
+        c.metadata_v2("SIS2024-01")
+        self.assertEqual(metadata_threads(), before)
+        c.masts()
+        self.assertTrue(c.wait_background(10))
+        for t in metadata_threads():
+            t.join(5)
+        self.assertEqual(metadata_threads(), [])
+
+    def test_warm_up_sequential(self):
+        """warm-up: v2 metadata of every station, one at a time, then stops"""
+        self.server.delay = 0.05
+        c = self.threaded()
+        t0 = time.perf_counter()
+        c.masts()
+        self.assertLess(time.perf_counter() - t0, 0.05 + 0.1)          # did not wait for the warm-up
+        self.assertTrue(c.wait_background(10))
+        self.assertEqual(self.api_requests("v2/metadata"), [{"station": "SIS2024-01"}, {"station": "NUKI2026-M9"},
+                                                            {"station": "SIS2024-03"}, {"station": "SIS2024-05"}])
+        self.assertEqual(self.server.max_in_flight, 1)
+        n = len(self.server.requests)
+        c.masts()
+        c.mast("Mast 9")
+        self.assertTrue(c.wait_background(10))
+        self.assertEqual(len(self.server.requests), n)                  # all fresh: nothing more
+
+    def test_first_load_fast(self):
+        """slow API: mast list + Mast 6's loggers in about 2 requests' time, none sent twice"""
+        self.server.delay = 0.3
+        c = self.threaded()
+        t0 = time.perf_counter()
+        c.masts()
+        mast = c.mast("Mast 6")
+        elapsed = time.perf_counter() - t0
+        self.assertEqual([lg["value"] for lg in mast["loggers"]], [TEKBOX_M6, CAMPBELL_M6])
+        self.assertLess(elapsed, 0.3 * 3)           # before T17: 5 requests (1.5 s)
+        self.assertTrue(c.wait_background(10))
+        stations = [p["station"] for p in self.api_requests("v2/metadata")]
+        self.assertEqual(sorted(stations), ["NUKI2026-M9", "SIS2024-01", "SIS2024-03", "SIS2024-05"])
+
+    def stale_client(self):
+        now = [1000.0]
+        c = self.threaded(clock=lambda: now[0])
+        old = c.metadata_v1()
+        now[0] += 601
+        return c, old
+
+    def test_stale_served_at_once(self):
+        """stale metadata is served at once and refreshed once"""
+        c, old = self.stale_client()
+        self.server.delay = 0.5
+        t0 = time.perf_counter()
+        self.assertIs(c.metadata_v1(), old)
+        self.assertLess(time.perf_counter() - t0, 0.25)
+        self.assertTrue(c.wait_background(10))
+        self.assertEqual(len(self.api_requests("v1/metadata")), 2)
+        self.server.delay = 0.0
+        self.assertIsNot(c.metadata_v1(), old)                  # the refreshed entry
+        self.assertTrue(c.wait_background(10))
+        self.assertEqual(len(self.api_requests("v1/metadata")), 2)
+
+    def test_one_refresh_at_a_time(self):
+        """requests during a refresh get the old data, no second refresh"""
+        c, old = self.stale_client()
+        self.server.delay = 0.3
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(c.metadata_v1())) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5)
+        results.append(c.metadata_v1())
+        self.assertTrue(all(r is old for r in results))
+        self.assertTrue(c.wait_background(10))
+        self.assertEqual(len(self.api_requests("v1/metadata")), 2)
+        self.assertEqual(self.server.max_in_flight, 1)
+
+    def test_failed_refresh_keeps_old(self):
+        """a failed refresh keeps the old entry (one WARNING); the next request retries"""
+        c, old = self.stale_client()
+        self.server.force = INTERNAL
+        with self.assertLogs("nuki.v2.api", level="WARNING") as logs:
+            self.assertIs(c.metadata_v1(), old)
+            self.assertTrue(c.wait_background(10))
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("refresh failed", logs.output[0])
+        self.server.force = None
+        self.assertIs(c.metadata_v1(), old)                     # still stale: served, refreshed again
+        self.assertTrue(c.wait_background(10))
+        self.assertEqual(len(self.api_requests("v1/metadata")), 3)
+        self.assertIsNot(c.metadata_v1(), old)
+
+    def test_missing_blocks_and_raises(self):
+        """a missing entry blocks; an error raises, nothing cached or queued"""
+        self.server.delay = 0.2
+        c = self.threaded()
+        t0 = time.perf_counter()
+        c.metadata_v2("SIS2024-01")
+        self.assertGreaterEqual(time.perf_counter() - t0, 0.2)
+        self.server.force = INTERNAL
+        with self.assertLogs("nuki.v2.api", level="WARNING"), self.assertRaises(ApiError):
+            c.metadata_v2("SIS2024-03")
+        self.assertTrue(c.wait_background(1))
+        self.assertEqual(len(self.api_requests("v2/metadata")), 2)
+
+    def test_failed_warm_up_stops(self):
+        """a failed warm-up request: one WARNING, the rest of the queue dropped until the next request"""
+        self.server.force_if = ({"path": "/v2/metadata"}, INTERNAL)
+        c = self.threaded()
+        with self.assertLogs("nuki.v2.api", level="WARNING") as logs:
+            c.masts()
+            self.assertTrue(c.wait_background(10))
+        self.assertEqual((len(logs.records), len(self.api_requests("v2/metadata"))), (1, 1))
+        self.server.force_if = None
+        self.assertEqual([m["name"] for m in c.masts()], ["Mast 6", "Mast 9", "Mast 13"])
+        self.assertTrue(c.wait_background(10))
+        self.assertEqual(len(self.api_requests("v2/metadata")), 1 + 4)
+
+    def test_thread_start_failure(self):
+        """a worker that cannot start: one WARNING, the request is served"""
+        def broken(target):
+            raise RuntimeError("can't start new thread")
+        c = Client(self.root_url, start_thread=broken)
+        with self.assertLogs("nuki.v2.api", level="WARNING"):
+            self.assertEqual(len(c.masts()), 3)
 
 
 # ---- chunks -----------------------------------------------------------------------------------

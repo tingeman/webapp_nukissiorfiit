@@ -33,6 +33,7 @@ RESOLUTION_HELP = ("Daily: the daily mean. Full: every measurement, at most one 
 
 # ---- messages -------------------------------------------------------------------------------
 MASTS_UNAVAILABLE = "The list of masts could not be loaded. {reason}"
+LOGGERS_UNAVAILABLE = "The loggers of this mast could not be loaded. {reason}"
 NO_MASTS = "No mast with data was found in the database."
 CHOOSE_FIRST = "Choose a mast and a logger."
 CHOOSE_PERIOD = "Choose a start and an end date."

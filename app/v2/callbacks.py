@@ -9,9 +9,13 @@ is the process's one api_client.Client (its metadata caches live on it).
 
 Data flow (requests per action in the plan, "Phase 2 design"):
 
-1. Page load (``url``): the catalogue (``client.masts()``: v1 metadata and v2 metadata per
-   station, cached by the client 10 minutes) into the ``masts`` store; the first mast.
-2. Mast -> logger options, default the logger with the latest data (``default_logger``).
+1. Page load (``url``): the mast list (``client.masts()``: v1 metadata only, cached by the
+   client) into the ``masts`` store, without loggers; the first mast.
+2. Mast -> ``client.mast(name)``: the mast's loggers from the v2 metadata of its stations
+   only (1, or 2 for Mast 9; cached by the client, which then warms up the other stations
+   in the background, T17). The ``masts`` store gets the mast's "loggers" (the other masts
+   keep theirs or have none yet), which every later callback reads; the logger options,
+   default the logger with the latest data (``default_logger``).
 3. Logger -> date picker limits and range: the logger's first..last measurement day.
 4. Logger, period or Daily/Full (``resolution``) -> ``load``: Daily is one /daily request
    set for the period (one line of daily means per series). Full is /raw for the period, at
@@ -58,7 +62,8 @@ Data flow (requests per action in the plan, "Phase 2 design"):
    zoom refetches /raw for the window per logger with data in it. The ``profile`` store comes
    from the joined ground temperatures (one station per day: profile.day_stations).
 
-8. Download (T12, download.py): its own selectors. Mast -> the download checklist (the mast's
+8. Download (T12, download.py): its own selectors. The ``masts`` store (after the mast's
+   loggers have arrived) -> the download checklist (the mast's
    loggers, all ticked, and "All" ticked); "All" ticks every logger or none, and is ticked
    exactly when every logger is. The ticked loggers -> the year dropdowns (options and
    default: their first..last year with data; reset on every change of the ticks). The
@@ -136,8 +141,9 @@ def is_all(value) -> bool:
 def logger_options(mast) -> list:
     """The logger dropdown options of a catalogue mast: its loggers, and "All loggers" last
     when it has 2 or more."""
-    options = [{"label": lg["label"], "value": lg["value"]} for lg in mast["loggers"]]
-    if len(mast["loggers"]) >= 2:
+    loggers = mast.get("loggers") or []
+    options = [{"label": lg["label"], "value": lg["value"]} for lg in loggers]
+    if len(loggers) >= 2:
         options.append({"label": texts.LOGGER_ALL, "value": all_value(mast["name"])})
     return options
 
@@ -184,7 +190,7 @@ def fetch_each(fetch, items) -> list:
 
 def find_logger(masts, value):
     for m in masts or []:
-        for lg in m["loggers"]:
+        for lg in m.get("loggers") or []:
             if lg["value"] == value:
                 return lg
     return None
@@ -362,7 +368,7 @@ def find_mast_of(masts, logger_value):
     """The catalogue mast of a logger value (also "all:<mast>"), or None."""
     if is_all(logger_value):
         return find_mast(masts, logger_value[len(ALL_PREFIX):])
-    return next((m for m in masts or [] if any(lg["value"] == logger_value for lg in m["loggers"])), None)
+    return next((m for m in masts or [] if any(lg["value"] == logger_value for lg in m.get("loggers") or [])), None)
 
 
 def describe(masts, logger_value, resolution=None, names=None) -> str:
@@ -707,7 +713,7 @@ def download_ticks(trigger, mast, all_value, values):
     ``trigger`` changed ("download-all", "download-loggers", else the mast: reset to all)."""
     if mast is None:
         return [], [], []
-    options = [{"label": lg["label"], "value": lg["value"]} for lg in mast["loggers"]]
+    options = [{"label": lg["label"], "value": lg["value"]} for lg in mast.get("loggers") or []]
     every = [o["value"] for o in options]
     if trigger == "download-all":
         ticked = every if DOWNLOAD_ALL in (all_value or []) else []
@@ -775,17 +781,28 @@ def register(app, client: api_client.Client, download_budget_s: float | None = N
         return masts, options, masts[0]["name"], None
 
     @app.callback(
+        Output("masts", "data", allow_duplicate=True),
         Output("logger", "options"),
         Output("logger", "value"),
+        Output("masts-message", "children", allow_duplicate=True),
         Input("mast", "value"),
         State("masts", "data"),
+        prevent_initial_call=True,
     )
     def fill_loggers(mast_name, masts):
-        mast = find_mast(masts, mast_name)
-        if mast is None:
-            return [], None
+        # the mast's loggers: v2 metadata of its stations only (T17); they go into the masts
+        # store with the logger value, so the callbacks the logger triggers see them
+        if find_mast(masts, mast_name) is None:
+            return no_update, [], None, no_update
+        try:
+            mast = client.mast(mast_name)
+        except api_client.ApiError as e:        # the client logged it
+            return no_update, [], None, _alert(texts.LOGGERS_UNAVAILABLE.format(reason=str(e)), "danger")
+        if mast is None:        # no longer in the API's metadata
+            return no_update, [], None, _alert(texts.CHOOSE_FIRST, "warning")
+        masts = [mast if m["name"] == mast_name else m for m in masts]
         default = api_client.default_logger(mast)
-        return logger_options(mast), default["value"] if default else None
+        return masts, logger_options(mast), default["value"] if default else None, None
 
     @app.callback(
         Output("period", "min_date_allowed"),
@@ -892,12 +909,12 @@ def register(app, client: api_client.Client, download_budget_s: float | None = N
         Output("download-loggers", "options"),
         Output("download-loggers", "value"),
         Output("download-all", "value"),
-        Input("mast", "value"),
+        Input("masts", "data"),         # the mast's loggers have arrived (fill_loggers)
         Input("download-all", "value"),
         Input("download-loggers", "value"),
-        State("masts", "data"),
+        State("mast", "value"),
     )
-    def tick_download_loggers(mast_name, all_value, values, masts):
+    def tick_download_loggers(masts, all_value, values, mast_name):
         return download_ticks(ctx.triggered_id, find_mast(masts, mast_name), all_value, values)
 
     @app.callback(

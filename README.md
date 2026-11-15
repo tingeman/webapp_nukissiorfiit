@@ -91,8 +91,11 @@ except for its logger selector (phase 1). The new page replaces the classic one 
 
 What it shows:
 
-- **Mast and logger selectors.** The masts come from the API catalogue after the page has
-  loaded. The logger defaults to the one with the latest data; for a mast with two or more
+- **Mast and logger selectors.** The masts come from the API's v1 metadata after the page
+  has loaded; a mast's loggers from the v2 metadata of its stations when it is chosen. The
+  client keeps the metadata 10 minutes, serves older metadata while it refreshes it in the
+  background, and warms up the other masts' metadata in the background, one request at a
+  time. The logger defaults to the one with the latest data; for a mast with two or more
   loggers the last option is **All loggers**, which joins the loggers of one station into
   one series per depth or sensor (a change of logger is marked by a dashed line). The date
   range follows the logger's first and last day.

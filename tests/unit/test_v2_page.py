@@ -14,7 +14,7 @@ from unittest import mock
 
 from flask import Flask
 
-from support import APP_DIR, ApiTestCase, config, fake_api
+from support import APP_DIR, ApiTestCase, ManualThreads, config, fake_api
 
 import app  # noqa: E402  (the production server with both pages)
 import v2  # noqa: E402
@@ -80,7 +80,8 @@ class PageTestCase(ApiTestCase):
     def setUp(self):
         super().setUp()
         self.set_settings(backend_api_daily_chunk_years=3)
-        self.client = Client.from_settings(config.settings)
+        self.background = ManualThreads()       # the client's background worker runs only when a test says so
+        self.client = Client.from_settings(config.settings, start_thread=self.background)
         self.dash = v2.create_app(Flask("v2test"), client=self.client)
         self.http = self.dash.server.test_client()
 
@@ -107,6 +108,18 @@ class PageTestCase(ApiTestCase):
     def masts(self):
         return self.call([("masts", "data"), ("mast", "options"), ("mast", "value"),
                           ("masts-message", "children")], [("url", "pathname", v2.URL_PREFIX)])
+
+    def fill_loggers(self, mast, masts):
+        """fill_loggers for a mast: {"masts": {"data"}, "logger": {"options", "value"}, "masts-message": ...}"""
+        return self.call([("masts", "data"), ("logger", "options"), ("logger", "value"), ("masts-message", "children")],
+                         [("mast", "value", mast)], state=[("masts", "data", masts)])
+
+    def catalogue_store(self):
+        """The masts store after the page load and each mast chosen once (every mast with its loggers)."""
+        masts = self.masts()["masts"]["data"]
+        for m in list(masts):
+            masts = self.fill_loggers(m["name"], masts).get("masts", {}).get("data", masts)
+        return masts
 
     def load_all(self, logger, start, end, resolution="daily", masts=None, view=None, changed=None):
         """load_data: (figure, info children, message children, view, profile store); the
@@ -259,8 +272,7 @@ class SelectorTest(PageTestCase):
         masts = self.masts()["masts"]["data"]
 
         def loggers(name):
-            r = self.call([("logger", "options"), ("logger", "value")], [("mast", "value", name)],
-                          state=[("masts", "data", masts)])
+            r = self.fill_loggers(name, masts)
             return [o["value"] for o in r["logger"]["options"]], r["logger"]["value"]
         options, value = loggers("Mast 6")
         self.assertEqual(sorted(options[:-1]), sorted([TEKBOX_M6, CAMPBELL_M6]))
@@ -270,13 +282,66 @@ class SelectorTest(PageTestCase):
 
     def test_period_from_logger(self):
         """logger -> date picker limits and range = the logger's first..last measurement day"""
-        masts = self.masts()["masts"]["data"]
+        masts = self.fill_loggers("Mast 6", self.masts()["masts"]["data"])["masts"]["data"]
         props = ["min_date_allowed", "max_date_allowed", "start_date", "end_date", "initial_visible_month"]
         r = self.call([("period", p) for p in props], [("logger", "value", TEKBOX_M6)],
                       state=[("masts", "data", masts)])
         self.assertEqual([r["period"][p] for p in props],
                          ["2026-09-01", "2026-09-05", "2026-09-01", "2026-09-05", "2026-09-05"])
 
+
+    def test_first_load_requests(self):
+        """first load: 1 /v1/metadata, then v2 only for Mast 6's station; the warm-up after, one at a time"""
+        r = self.masts()
+        self.assertEqual([p for p, _ in self.server.requests], ["/mdb/api/v1/metadata"])
+        self.assertEqual(r["masts"]["data"], [{"name": "Mast 6", "station_identifiers": ["SIS2024-01"]},
+                                              {"name": "Mast 9", "station_identifiers": ["NUKI2026-M9", "SIS2024-03"]},
+                                              {"name": "Mast 13", "station_identifiers": ["SIS2024-05"]}])
+        r = self.fill_loggers("Mast 6", r["masts"]["data"])
+        self.assertEqual(self.api_requests("metadata"), [{}, {"station": "SIS2024-01"}])
+        self.assertEqual(r["logger"]["value"], CAMPBELL_M6)
+        mast6 = r["masts"]["data"][0]
+        self.assertEqual([lg["value"] for lg in mast6["loggers"]], [TEKBOX_M6, CAMPBELL_M6])
+        self.assertNotIn("loggers", r["masts"]["data"][1])
+        self.assertIsNone(r["masts-message"]["children"])
+        # the background warm-up (run here by the test): the other included stations, in mast order
+        self.assertEqual(self.background.run(), 1)
+        self.assertEqual(self.api_requests("v2/metadata")[1:],
+                         [{"station": "NUKI2026-M9"}, {"station": "SIS2024-03"}, {"station": "SIS2024-05"}])
+        self.assertEqual(self.server.max_in_flight, 1)
+        n = len(self.server.requests)
+        r9 = self.fill_loggers("Mast 9", r["masts"]["data"])       # another mast: from the cache
+        self.assertEqual(len(self.server.requests), n)
+        self.assertEqual([o["value"] for o in r9["logger"]["options"]],
+                         ["deveui:feedbeefcafe0001", "serial:NUKI2026-M9:12215", "all:Mast 9"])
+        self.assertEqual(self.background.run(), 0)                  # nothing left to warm up
+
+    def test_loggers_error(self):
+        """loggers not available: an alert, no options, the store unchanged"""
+        masts = self.masts()["masts"]["data"]
+        self.server.force = (500, {"error": {"code": "INTERNAL_ERROR", "message": "boom", "details": {}}})
+        r = self.fill_loggers("Mast 6", masts)
+        self.assertEqual((r["logger"]["options"], r["logger"]["value"]), ([], None))
+        self.assertNotIn("masts", r)
+        self.assertIn("boom", text_of(r["masts-message"]["children"]))
+        self.assertIn("loggers of this mast", text_of(r["masts-message"]["children"]))
+
+    def test_unknown_mast(self):
+        """a mast not in the store: no options, no request"""
+        masts = self.masts()["masts"]["data"]
+        n = len(self.server.requests)
+        r = self.fill_loggers("Mast 99", masts)
+        self.assertEqual((r["logger"]["options"], r["logger"]["value"]), ([], None))
+        self.assertEqual(len(self.server.requests), n)
+
+    def test_mast_without_data_hidden_after_warm_up(self):
+        """a mast without data is listed until the warm-up, then left out"""
+        self.server.fixtures["measurements"] = {k: v for k, v in self.server.fixtures["measurements"].items()
+                                                if not str(k).startswith("41")}
+        names = [o["value"] for o in self.masts()["mast"]["options"]]
+        self.assertEqual(names, ["Mast 6", "Mast 9", "Mast 13"])
+        self.background.run()
+        self.assertEqual([o["value"] for o in self.masts()["mast"]["options"]], ["Mast 6", "Mast 9"])
 
 # ---- Daily and Full ---------------------------------------------------------------------------
 
@@ -576,7 +641,7 @@ class PanTest(PageTestCase):
 class HeadingTest(PageTestCase):
     def setUp(self):
         super().setUp()
-        self.catalogue = self.masts()["masts"]["data"]
+        self.catalogue = self.catalogue_store()
         self.server.requests.clear()
 
     def heading(self):
@@ -692,7 +757,7 @@ class SwitchTest(PageTestCase):
 
     def test_all_loggers_daily_to_full_zoomed(self):
         """All loggers, Daily -> Full zoomed into one logger's days: 1 /raw (that logger, the window) + the profile's /daily per logger with data in its days"""
-        masts = self.masts()["masts"]["data"]
+        masts = self.catalogue_store()
         *_, view = self.load_all("all:Mast 6", "2026-09-01", "2026-10-05", masts=masts)
         view = dict(view, window=["2026-10-02T00:00:00+00:00", "2026-10-03T00:00:00+00:00"])
         fig, info, message, new_view, store = self.switch("all:Mast 6", "2026-09-01", "2026-10-05", "full", view, masts)
