@@ -14,6 +14,8 @@ Component ids (used by callbacks.py and the tests):
                      not persisted (the logger callback sets it on every load)
     resolution       "daily" (default) / "full"; persisted per browser session
     message          problem of the last data load (an alert)
+    data-heading     what the figure shows: mast, station(s), logger(s), Daily/Full, period
+                     (and the problem when nothing is drawn); written with the figure
     info             what the figure shows, and the requests it took
     data-graph       the figure (one make_subplots figure, shared x axes)
     view             dcc.Store: what the figure shows (callbacks.py), for the zoom
@@ -23,6 +25,8 @@ Component ids (used by callbacks.py and the tests):
     profile-body     slider, envelope choice, label and profile figure; hidden without data
     profile-day      day slider; value = days since 1970-01-01 (its tooltip shows the date,
                      assets/profile.js); limits = the loaded days, default the last one
+                     (set by the load callback); updatemode "drag": the profile follows
+                     the slider while it is dragged (drawn in the browser, no request)
     profile-envelope "day" (default) / "annual" / "both"; persisted per browser session
     profile-label    the chosen day and the annual envelope's window
     profile-graph    temperature against depth of the chosen day
@@ -30,7 +34,10 @@ Component ids (used by callbacks.py and the tests):
     download-from, download-to  first and last calendar year of the download (dropdowns;
                      options and default: the first..last year with data of the loggers
                      ticked in download-loggers)
-    download-all     checklist with the one option "All" (value "all"), above download-loggers;
+    profile-card, download-card  the two cards, side by side (2/3 and 1/3 width, not
+                     stretched to equal height) on lg+ screens, stacked below
+    download-all     checklist with the one option "Toggle all recording devices at this
+                     station" (value "all"), above download-loggers;
                      ticking it ticks every logger, unticking it none; it is ticked exactly
                      when every logger is
     download-loggers checklist of the mast's loggers; default all; reset when the mast changes
@@ -71,7 +78,10 @@ def controls():
 
 def figure_section():
     return dbc.Card(dbc.CardBody([
-        dcc.Loading(html.Div(id="info", className="nuki-info"), type="dot", delay_show=200,
+        # the heading says what the figure shows; written with the figure (same callback), so
+        # it never describes other data; the spinner marks it while a new load runs
+        dcc.Loading([html.H2(id="data-heading", className="nuki-heading"),
+                     html.Div(id="info", className="nuki-info")], type="dot", delay_show=200,
                     overlay_style={"visibility": "visible"}),
         dcc.Loading(dcc.Graph(id="data-graph", config=CONFIG,
                               figure=figures.empty_figure(texts.FIGURE_EMPTY)),
@@ -89,16 +99,16 @@ def profile_section():
         labelClassName="btn btn-outline-primary btn-sm", labelCheckedClassName="active")
     slider = dcc.Slider(
         id="profile-day", min=0, max=1, step=1, value=None, marks={}, included=False,
-        allow_direct_input=False, updatemode="mouseup",
+        allow_direct_input=False, updatemode="drag",
         tooltip={"placement": "bottom", "always_visible": True, "transform": "nukiDay"})
     return dbc.Card(dbc.CardBody([
         html.Div(texts.PROFILE_TITLE, className="nuki-card-title"),
         html.Div(texts.PROFILE_EMPTY, id="profile-note", className="nuki-profile-note"),
         html.Div([
-            dbc.Row([
-                _field(texts.PROFILE_DAY, html.Div(slider, className="nuki-profile-slider"), xs=12, lg=8),
-                _field(texts.PROFILE_ENVELOPE, html.Div(envelope, title=texts.ENVELOPE_HELP), xs=12, lg=4),
-            ], className="g-3 mb-2"),
+            dbc.Row([          # stacked: the card is half the page wide on large screens
+                _field(texts.PROFILE_DAY, html.Div(slider, className="nuki-profile-slider"), xs=12),
+                _field(texts.PROFILE_ENVELOPE, html.Div(envelope, title=texts.ENVELOPE_HELP), xs=12),
+            ], className="g-2 mb-2"),
             html.Div(id="profile-label", className="nuki-info"),
             # explicit height: the graph is created inside the hidden profile-body, and
             # without it its div keeps height 0 when shown (the plot then overlaps the next card)
@@ -107,32 +117,43 @@ def profile_section():
                                   figure=figures.empty_figure("", figures.PROFILE_HEIGHT)),
                         type="circle", delay_show=300),
         ], id="profile-body", style={"display": "none"}),
-    ]), className="nuki-card mb-3")
+    ]), id="profile-card", className="nuki-card")
 
 
 def download_section():
+    """The download card, for the narrow right-hand column on large screens: everything
+    stacked, top to bottom: title, intro, the year dropdowns (side by side where the column
+    is wide enough: below lg, where the card is full width, and on xl), the "toggle all" box,
+    the logger checklist, the button directly below, then its message."""
     return dbc.Card(dbc.CardBody([
         html.Div(texts.DOWNLOAD_TITLE, className="nuki-card-title"),
         html.P(texts.DOWNLOAD_INTRO, className="nuki-download-intro"),
         dbc.Row([
             _field(texts.DOWNLOAD_FROM, dcc.Dropdown(id="download-from", options=[], clearable=False),
-                   xs=6, md=3, xl=2),
+                   xs=6, lg=12, xl=6),
             _field(texts.DOWNLOAD_TO, dcc.Dropdown(id="download-to", options=[], clearable=False),
-                   xs=6, md=3, xl=2),
-            _field(texts.DOWNLOAD_LOGGERS, html.Div([
-                dbc.Checklist(id="download-all", options=[{"label": texts.DOWNLOAD_ALL, "value": "all"}],
-                              value=["all"], className="nuki-download-all"),
-                dbc.Checklist(id="download-loggers", options=[], value=[],
-                              className="nuki-download-loggers"),
-            ]), xs=12, md=6, xl=8),
-        ], className="g-3 mb-3"),
+                   xs=6, lg=12, xl=6),
+        ], className="g-2 mb-3"),
         html.Div([
-            dbc.Button(texts.DOWNLOAD_BUTTON, id="download-button", color="primary", n_clicks=0,
-                       className="me-3"),
-            html.Div(id="download-message", className="nuki-download-message"),
-        ], className="d-flex flex-wrap align-items-center gap-2"),
+            dbc.Label(texts.DOWNLOAD_LOGGERS, className="nuki-label"),
+            dbc.Checklist(id="download-all", options=[{"label": texts.DOWNLOAD_ALL, "value": "all"}],
+                          value=["all"], className="nuki-download-all"),
+            dbc.Checklist(id="download-loggers", options=[], value=[], className="nuki-download-loggers"),
+        ], className="mb-3"),
+        dbc.Button(texts.DOWNLOAD_BUTTON, id="download-button", color="primary", n_clicks=0),
+        html.Div(id="download-message", className="nuki-download-message mt-2"),
         dcc.Download(id="download-file"),
-    ]), className="nuki-card mb-3")
+    ]), id="download-card", className="nuki-card")
+
+
+def cards():
+    """The profile card (two thirds) and the download card (one third) side by side on large
+    screens (lg and up), each only as tall as its content (the row aligns them at the top);
+    both full width, the download below the profile, on smaller screens."""
+    return dbc.Row([
+        dbc.Col(profile_section(), xs=12, lg=8),
+        dbc.Col(download_section(), xs=12, lg=4),
+    ], className="g-3 mb-3 align-items-start")
 
 
 def build(classic_url):
@@ -158,8 +179,7 @@ def build(classic_url):
             controls(),
             html.Div(id="message"),
             figure_section(),
-            profile_section(),
-            download_section(),
+            cards(),
             html.Footer(texts.FOOTER, className="nuki-footer"),
         ], fluid="xl", className="nuki-main"),
     ])

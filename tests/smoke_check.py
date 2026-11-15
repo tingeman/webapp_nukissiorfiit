@@ -18,14 +18,16 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
              the order the page runs them: load_masts (Mast 6, Mast 9, Mast 13), fill_loggers
              (Mast 6: default the Campbell, the logger with the latest data), set_period (its
              first..last day), load_data Daily (one figure: ground temperature, weather,
-             pressure in kPa, the two angles, sensor temperature, battery; mean lines with
-             min/max bands) and Full (the same rows, one line per series), each with the
-             profile store (the 3 ground temperature depths), zoom_data on a window of the
-             Full figure (its traces patched), setup_profile/draw_profile (the slider on
-             the last day, the profile of that day with the annual envelope, the day marked
-             on the data figure), and "All loggers" of Mast 6 in Daily (the dropdown's last
-             option, the period over both loggers, one line per depth over both, a dashed
-             line at the logger change)
+             pressure in kPa, the two angles, sensor temperature, battery; one line of
+             daily means per series, no bands, date tick labels on every row; the heading
+             naming mast, station, logger, values and period) and Full (the same rows, one
+             line per series), each with the profile store (the 3 ground temperature
+             depths, the annual envelope and the figure template) and the profile slider
+             (on the last day), zoom_data on a window of the Full figure (its traces
+             patched, the window recorded in the view), the clientside profile callback
+             (registered in _dash-dependencies, assets/profile.js served), and "All
+             loggers" of Mast 6 in Daily (the dropdown's last option, the period over both
+             loggers, one line per depth over both, a dashed line at the logger change)
   v2download POST /app/nuki/v2/_dash-update-component for the download card: the checklists
              of Mast 6 (both loggers and "All" ticked), the year dropdowns (2026..2026) and the
              button (All, 2026): dcc.send_bytes data of nuki_Mast_6_2026-2026.xlsx that opens
@@ -258,52 +260,73 @@ def v2_duplicate_outputs(outputs):
     fail(f"v2: no callback with the outputs {wanted}")
 
 
+V2_LOAD_OUTPUTS = ([("data-graph", "figure"), ("info", "children"), ("message", "children"), ("view", "data"),
+                    ("profile", "data")] + [("profile-day", p) for p in ("min", "max", "marks", "value")]
+                   + [("profile-body", "style"), ("profile-note", "children"), ("data-heading", "children")])
+
+
+def text_of(node):
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return " ".join(text_of(n) for n in node)
+    if isinstance(node, dict):
+        return text_of(node.get("props", {}).get("children"))
+    return ""
+
+
 def v2_load_raw(logger, start, end, resolution, masts=None):
-    r = v2_call([("data-graph", "figure"), ("info", "children"), ("message", "children"), ("view", "data"),
-                 ("profile", "data")],
+    r = v2_call(V2_LOAD_OUTPUTS,
                 [("logger", "value", logger), ("period", "start_date", start),
                  ("period", "end_date", end), ("resolution", "value", resolution)],
-                state=[("masts", "data", masts)])
+                state=[("masts", "data", masts), ("view", "data", None)])
     if r["message"]["children"]:
         fail(f"v2 {logger} {resolution}: message {json.dumps(r['message']['children'])[:300]}")
     return r
 
 
-def v2_load(logger, start, end, resolution):
-    r = v2_load_raw(logger, start, end, resolution)
+def v2_load(logger, start, end, resolution, masts=None):
+    r = v2_load_raw(logger, start, end, resolution, masts)
     fig, view = r["data-graph"]["figure"], r["view"]["data"]
     titles = [a.get("text") for a in fig.get("layout", {}).get("annotations", [])]
-    if titles != V2_ROWS:
-        fail(f"v2 {resolution}: row titles {titles}, expected {V2_ROWS}")
-    pressure = [t for t in fig["data"] if t.get("yaxis") == "y4" and t.get("fill") is None]
+    suffix = ", daily mean" if resolution == "daily" else ", all measurements"
+    if titles != [t + suffix for t in V2_ROWS]:
+        fail(f"v2 {resolution}: row titles {titles}, expected {V2_ROWS} + {suffix!r}")
+    axes = [k for k in fig["layout"] if re.fullmatch(r"xaxis\d*", k)]
+    if len(axes) != len(V2_ROWS) or not all(fig["layout"][a].get("showticklabels") for a in axes):
+        fail(f"v2 {resolution}: date tick labels not on every row")
+    heading = text_of(r["data-heading"]["children"])
+    mode = "Daily means" if resolution == "daily" else "Full resolution"
+    if heading != f"Mast 6 · SIS2024-01 · CR300_M6 (12096) · {mode} · {start} to {end}":
+        fail(f"v2 {resolution}: heading {heading!r}")
+    slider = r["profile-day"]
+    if slider["value"] != slider["max"] or slider["max"] - slider["min"] != 4 or r["profile-note"]["children"]:
+        fail(f"v2 profile slider: {slider}, note {r['profile-note']['children']}")
+    pressure = [t for t in fig["data"] if t.get("yaxis") == "y4"]
     p0 = values(pressure[0]["y"])[0] if pressure else None
     if p0 is None or abs(p0 - 101.3) > 0.2:
         fail(f"v2 {resolution}: first pressure value {p0}, expected about 101.3 (kPa)")
     store = r["profile"]["data"] or {}
     if store.get("depths") != [0.1, 0.25, 0.5] or store.get("n") != 5:
         fail(f"v2 {resolution}: profile store depths {store.get('depths')}, {store.get('n')} days")
+    if [len(row) for row in store.get("amax", [])] != [5, 5, 5] or not store.get("draw", {}).get("layout"):
+        fail(f"v2 {resolution}: profile store without the annual envelope or the figure template")
     return fig, view, store
 
 
-def check_v2_profile(store):
-    r = v2_call([("profile-day", p) for p in ("min", "max", "marks", "value")]
-                + [("profile-body", "style"), ("profile-note", "children")], [("profile", "data", store)])
-    slider = r["profile-day"]
-    if slider["value"] != slider["max"] or slider["max"] - slider["min"] != 4 or r["profile-note"]["children"]:
-        fail(f"v2 profile slider: {slider}, note {r['profile-note']['children']}")
-    outputs = v2_duplicate_outputs([("profile-graph", "figure"), ("profile-label", "children"),
-                                    ("data-graph", "figure")])
-    r = call(outputs, [("profile-day", "value", slider["value"]), ("profile-envelope", "value", "both"),
-                       ("profile", "data", store)], base=V2)
-    fig = r["profile-graph"]["figure"]
-    metas = [t.get("meta") for t in fig.get("data", [])]
-    mean = next((t for t in fig["data"] if t.get("meta") == "mean"), {})
-    if metas != ["annual-max", "annual-min", "day-band", "mean"] or values(mean.get("y") or []) != [-0.1, -0.25, -0.5]:
-        fail(f"v2 profile: traces {metas}, depths {mean.get('y')}")
-    ops = (r.get("data-graph", {}).get("figure") or {}).get("operations") or []
-    if [op.get("location") for op in ops] != [["layout", "shapes"]]:
-        fail(f"v2 profile day marker: {json.dumps(ops)[:300]}")
-    return len(metas)
+def check_v2_profile():
+    """The profile is drawn in the browser: the clientside callback is registered (inputs the
+    slider, the envelope and the store) and its script is served."""
+    with urllib.request.urlopen(V2 + "_dash-dependencies", timeout=20) as r:
+        deps = json.loads(r.read())
+    client = [d for d in deps if (d.get("clientside_function") or {}).get("namespace") == "nuki"]
+    if len(client) != 1 or [i["id"] for i in client[0]["inputs"]] != ["profile-day", "profile-envelope", "profile"]:
+        fail(f"v2 profile: clientside callback {json.dumps(client)[:300]}")
+    with urllib.request.urlopen(V2 + "assets/profile.js", timeout=20) as r:
+        js = r.read().decode()
+    if "dash_clientside.nuki" not in js:
+        fail("v2 profile: assets/profile.js without dash_clientside.nuki")
+    return client[0]["clientside_function"]["function_name"]
 
 
 def check_v2_all_loggers(masts):
@@ -348,25 +371,27 @@ def check_v2_callback():
     period = [r["period"][p] for p in props]
     if period != ["2026-10-01", "2026-10-05", "2026-10-01", "2026-10-05"]:
         fail(f"v2 period: {period}")
-    fig, view, store = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "daily")
-    n_profile = check_v2_profile(store)
-    bands = sum(1 for t in fig["data"] if t.get("fill") == "tonexty")
-    if view.get("mode") != "daily" or bands != 10:
-        fail(f"v2 daily: view {view.get('mode')}, {bands} min/max bands (expected 10)")
-    fig, view, _ = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
+    fig, view, store = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "daily", masts)
+    profile_fn = check_v2_profile()
+    bands = sum(1 for t in fig["data"] if t.get("fill"))
+    if view.get("mode") != "daily" or bands or len(fig["data"]) != 10:
+        fail(f"v2 daily: view {view.get('mode')}, {len(fig['data'])} traces, {bands} bands (expected 10, 0)")
+    fig, view, _ = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full", masts)
     if view.get("mode") != "full" or [t.get("meta") for t in fig["data"]] != view.get("keys"):
         fail(f"v2 full: view {view}")
-    outputs = v2_duplicate_outputs([("data-graph", "figure"), ("info", "children"), ("message", "children")])
+    outputs = v2_duplicate_outputs([("data-graph", "figure"), ("info", "children"), ("message", "children"),
+                                    ("view", "data"), ("data-heading", "children")])
     r = call(outputs, [("data-graph", "relayoutData",
                         {"xaxis.range[0]": "2026-10-02 00:00:00", "xaxis.range[1]": "2026-10-03 00:00:00"})],
              state=[("view", "data", view)], base=V2)
     ops = (r.get("data-graph", {}).get("figure") or {}).get("operations") or []
-    if len([op for op in ops if op.get("location", [None])[-1] == "x"]) != len(view["keys"]):
+    if len([op for op in ops if op.get("location", [None])[-1] == "x"]) != len(view["keys"]) \
+            or "view" not in r:
         fail(f"v2 zoom: {json.dumps(r)[:300]}")
     n_all = check_v2_all_loggers(masts)
     print(f"OK v2: 3 masts, Mast 6 default {CAMPBELL_M6}, period {period[2]}..{period[3]}, "
-          f"{len(V2_ROWS)} rows Daily ({bands} bands) and Full ({len(view['keys'])} lines), zoom patched, "
-          f"profile of the last day ({n_profile} traces, day marked); All loggers of Mast 6: {n_all} rows, "
+          f"{len(V2_ROWS)} rows Daily (no bands) and Full ({len(view['keys'])} lines), zoom patched, "
+          f"profile store and slider, clientside nuki.{profile_fn}; All loggers of Mast 6: {n_all} rows, "
           f"one change marker")
 
 

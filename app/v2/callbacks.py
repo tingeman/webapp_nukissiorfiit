@@ -14,23 +14,37 @@ Data flow (requests per action in the plan, "Phase 2 design"):
 2. Mast -> logger options, default the logger with the latest data (``default_logger``).
 3. Logger -> date picker limits and range: the logger's first..last measurement day.
 4. Logger, period or Daily/Full (``resolution``) -> ``load``: Daily is one /daily request
-   set for the period (mean lines with min/max bands). Full is /raw for the period, at most
-   one year (a longer period loads the year up to its end date, 365 or 366 days, and the info
-   line says so; with BACKEND_API_RAW_CHUNK_YEARS=1 that is always one /raw request), thinned to about figures.MAX_POINTS points per series. The ``view`` store keeps what
-   the figure shows: {"logger", "mode", "range": [lo, hi] ISO datetimes, "keys": the API
-   column key of each trace (None for band traces; All loggers: the join key), "note",
-   All loggers also "loggers": the mast's catalogue loggers}.
-5. Zoom (``data-graph.relayoutData``) in Full: /raw for the visible window only (one request
-   set, exactly the window's datetimes), thinned and patched into the traces by key (the
-   figure's zoom stays as the user left it); autorange (reset) loads the stored range again.
-   Daily makes no request on a zoom. Nothing is kept on the server between requests.
-6. The ground temperature profile (T10): ``load`` also fills the ``profile`` store
-   (profile.py: the daily ground temperatures, compact arrays). Daily reuses the load's
-   /daily result; Full makes one extra /daily request set for the same (one-year) range,
-   after the raw one. A zoom makes none. The store sets the day slider (limits, marks,
-   default the last day) or hides the profile with a note; the slider, the envelope choice
-   or a new store draw the profile from the store alone (no API request) and mark the day
-   on the data figure (a Patch of its shapes).
+   set for the period (one line of daily means per series). Full is /raw for the period, at
+   most one year (a longer period loads the year up to its end date, 365 or 366 days, and the
+   info line says so; with BACKEND_API_RAW_CHUNK_YEARS=1 that is always one /raw request),
+   thinned to about figures.MAX_POINTS points per series. The ``view`` store keeps what the
+   figure shows: {"logger", "mode", "range": [lo, hi] ISO datetimes, "keys": the API column
+   key of each trace (All loggers: the join key), "rows": figures.row_layout (the row titles
+   and their trace keys), "note", "window": the zoomed x range [lo, hi] ISO or None, All
+   loggers also "loggers": the mast's catalogue loggers}.
+   The Daily/Full switch keeps a zoom (T16, as webapp_grl_tsp 24872f4): when the switch
+   triggers the load and the view has a window for the same logger, Daily -> Full loads /raw
+   for that window only (cut to the period and to at most its last year, full_period), and
+   Full -> Daily loads the period as usual; both figures get the window as their x range.
+   The Full ``range`` is then the year up to the window's end (what a reset loads).
+5. Zoom or pan (``data-graph.relayoutData``, any x range change) in Full: /raw for the
+   visible window only (one request set, exactly the window's datetimes, cut to the selected
+   period, not to what was loaded before, and to at most its last year, with a note),
+   thinned and patched into the traces by key (the figure's zoom stays as the user left
+   it), the row titles too (thinned or not); the view's "range" becomes the window; a window
+   outside the period makes no request. Autorange (reset) loads the first Full load again
+   (the view's "home"; "period" holds the selected period). Daily makes no request on a zoom. Both
+   record the window in the ``view`` store (a Patch). Nothing is kept on the server between
+   requests.
+6. The ground temperature profile (T10, T16): ``load`` also fills the ``profile`` store
+   (profile.py: per depth and day the mean, min, max and annual envelope; figures.py: the
+   figure template) and sets the day slider (limits, marks, default the last day) or hides
+   the profile with a note. Daily reuses the load's /daily result; Full makes one extra
+   /daily request set for its range, after the raw one. A zoom makes none. The profile is
+   drawn in the browser (assets/profile.js, a clientside callback: no request, not even to
+   this server, while the slider is dragged): the slider, the envelope choice or a new
+   store draw it from the store alone and mark the day on the data figure (a Patch of its
+   shapes). The store goes to the browser only: no server callback takes it as an input.
 
 7. All loggers (T11): the logger dropdown's last option (``all:<mast name>``, only for a mast
    with 2 or more loggers). The date limits and default cover the union of the loggers'
@@ -42,7 +56,7 @@ Data flow (requests per action in the plan, "Phase 2 design"):
    /raw for the one-year window (full_period) per logger with data in it, then the profile's
    /daily per such logger. The ``view`` store then also holds the mast's ``loggers``, and a
    zoom refetches /raw for the window per logger with data in it. The ``profile`` store comes
-   from the joined ground temperatures (profile.for_day picks one station per day).
+   from the joined ground temperatures (one station per day: profile.day_stations).
 
 8. Download (T12, download.py): its own selectors. Mast -> the download checklist (the mast's
    loggers, all ticked, and "All" ticked); "All" ticks every logger or none, and is ticked
@@ -66,7 +80,7 @@ import time
 import uuid
 
 import dash_bootstrap_components as dbc
-from dash import Input, Output, Patch, State, ctx, dcc, html, no_update
+from dash import ClientsideFunction, Input, Output, Patch, State, ctx, dcc, html, no_update
 
 from . import api_client, download, figures, join, profile, texts
 
@@ -87,15 +101,7 @@ def size_text(n: int) -> str:
     return f"{n / (1024 * 1024):.1f} MB"
 
 
-def bin_text(seconds: float) -> str:
-    """A bin width as people say it: '30 s', '15 min', '6 h', '2 d' (as TSP)."""
-    if round(seconds) < 60:
-        return f"{max(round(seconds), 1)} s"
-    if round(seconds / 60) < 60:
-        return f"{round(seconds / 60)} min"
-    if round(seconds / 3600) < 48:
-        return f"{round(seconds / 3600)} h"
-    return f"{round(seconds / 86400)} d"
+bin_text = figures.bin_text
 
 
 def _date(value) -> dt.date | None:
@@ -315,14 +321,104 @@ def _full_what(lo, hi, bin_seconds, zoomed=False):
     return texts.INFO_THINNED.format(start=_fmt_day(lo), end=_fmt_day(hi), bin=bin_text(bin_seconds))
 
 
-def load(client: api_client.Client, logger_value, start, end, resolution, masts=None):
+def keep_window(view, logger_value):
+    """The zoomed x window (lo, hi) UTC datetimes of the ``view`` store, to keep across the
+    Daily/Full switch, or None (not zoomed, or another logger)."""
+    if not view or view.get("logger") != logger_value or not view.get("window"):
+        return None
+    lo, hi = (parse_time(t) for t in view["window"])
+    return (lo, hi) if lo is not None and hi is not None and lo < hi else None
+
+
+def zoomed_full(window, start: dt.date, end: dt.date):
+    """(window, range, limited) of a Full load that keeps a zoom: ``window`` cut to the days
+    start..end and to at most one year (its last year, as full_period; ``limited`` then
+    True); ``range`` (lo, hi): the year up to the window's last day, within start..end (what
+    autorange loads, and the profile's days). None if the window is outside the period."""
+    w = clip_window(window, day_bounds(start, end))
+    if w is None:
+        return None
+    first, _, limited = full_period(w[0].date(), w[1].date())
+    if limited:
+        w = (dt.datetime(first.year, first.month, first.day, tzinfo=UTC), w[1])
+    a, b, _ = full_period(start, w[1].date())
+    return w, day_bounds(a, b), limited
+
+
+def profile_store(selected, logger_value, changes=None, source=None) -> dict:
+    """The ``profile`` store (profile.store_data) with what the browser draws it with: the
+    figure template (figures.profile_spec), the logger change lines (All loggers), which
+    the day marker's Patch of the data figure keeps, and ``source`` (describe(): mast,
+    station, logger), which starts the profile's label."""
+    store = profile.store_data(selected, logger_value)
+    if profile.has_profile(store):
+        store["draw"] = figures.profile_spec(store, revision=str(logger_value))
+        store["shapes"] = figures.change_shapes(changes)
+        store["source"] = source
+    return store
+
+
+def find_mast_of(masts, logger_value):
+    """The catalogue mast of a logger value (also "all:<mast>"), or None."""
+    if is_all(logger_value):
+        return find_mast(masts, logger_value[len(ALL_PREFIX):])
+    return next((m for m in masts or [] if any(lg["value"] == logger_value for lg in m["loggers"])), None)
+
+
+def describe(masts, logger_value, resolution=None, names=None) -> str:
+    """What is drawn, without the period: "Mast 6 · SIS2024-01 · CR300_M6 (12096) · Daily
+    means" (``resolution`` None: without the values part). All loggers: "All loggers:
+    <names>" (``names``: the loggers fetched; default every logger of the mast) and the
+    stations of the mast."""
+    mast = find_mast_of(masts, logger_value)
+    parts = [mast["name"]] if mast else []
+    if is_all(logger_value):
+        loggers = (mast or {}).get("loggers") or []
+        stations = list(dict.fromkeys(lg.get("station") for lg in loggers if lg.get("station")))
+        if names is None:
+            names = [join.short_label(lg) for lg in loggers]
+        who = texts.HEADING_ALL.format(loggers="; ".join(names) or texts.INFO_NO_LOGGER)
+    else:
+        lg = find_logger(masts, logger_value)
+        stations = [lg["station"]] if lg and lg.get("station") else []
+        who = join.short_label(lg) if lg else str(logger_value)
+    parts += [", ".join(stations)] if stations else []
+    parts.append(who)
+    if resolution is not None:
+        parts.append(texts.HEADING_FULL if resolution == "full" else texts.HEADING_DAILY)
+    return texts.HEADING_SEP.join(parts)
+
+
+def heading(what: str | None, lo=None, hi=None, problem: str | None = None, times=False):
+    """The heading above the figure (``data-heading``): ``what`` (describe()), the period
+    lo..hi (dates, or with ``times`` date and time), and a problem (nothing drawn)."""
+    if not what:
+        return None
+    text = what
+    if lo is not None and hi is not None:
+        fmt = _fmt_time if times else (lambda t: t.isoformat()[:10])
+        text += texts.HEADING_SEP + texts.HEADING_PERIOD.format(start=fmt(lo), end=fmt(hi))
+    out = [html.Span(text, className="nuki-heading-what")]
+    if problem:
+        out.append(html.Span(texts.HEADING_SEP + problem, className="nuki-heading-problem"))
+    return out
+
+
+def _iso(window):
+    return [t.isoformat() for t in window] if window else None
+
+
+def load(client: api_client.Client, logger_value, start, end, resolution, masts=None, window=None):
     """Everything a logger/period/resolution change produces, as plain values: figure,
     info (children), message (alert or None), view (store or None), profile (store or
-    None, profile.py). Raises ApiError (not for the profile request of a Full load: its
+    None, profile_store). Raises ApiError (not for the profile request of a Full load: its
     error goes into the profile store, and the Full figure is shown). ``masts``: the
-    catalogue (the ``masts`` store), needed for All loggers only."""
+    catalogue (the ``masts`` store), needed for All loggers only. ``window``: (lo, hi) UTC
+    datetimes of a zoom to keep (keep_window; the Daily/Full switch), else None. Also
+    "heading": what the figure shows (heading()); without data the figure is empty and the
+    heading says so."""
     out = {"figure": figures.empty_figure(texts.FIGURE_EMPTY), "info": None, "message": None,
-           "view": None, "profile": None}
+           "view": None, "profile": None, "heading": None}
     if not logger_value:
         return out
     start, end = _date(start), _date(end)
@@ -337,7 +433,7 @@ def load(client: api_client.Client, logger_value, start, end, resolution, masts=
         if mast is None or len(mast.get("loggers") or []) < 2:
             out["message"] = _alert(texts.CHOOSE_FIRST, "warning")
             return out
-        return load_all(client, mast, logger_value, start, end, resolution, out)
+        return load_all(client, mast, logger_value, start, end, resolution, out, window)
     try:
         api_client.logger_params(logger_value)
     except ValueError:
@@ -345,87 +441,137 @@ def load(client: api_client.Client, logger_value, start, end, resolution, masts=
         return out
     revision = uuid.uuid4().hex[:8]
     t0 = time.perf_counter()
+    period = _iso(day_bounds(start, end))       # the selected period: a pan/zoom stays inside it
     if resolution == "full":
-        start, end, limited = full_period(start, end)
-        lo, hi = day_bounds(start, end)
-        result = client.raw(logger_value, lo, hi)
+        zoomed = zoomed_full(window, start, end) if window else None
+        if zoomed:              # the switch keeps the zoom: raw for the window only
+            shown, (lo, hi), limited = zoomed
+            note = texts.INFO_ZOOM_LIMIT if limited else None
+            start, end = lo.date(), hi.date()
+        else:
+            start, end, limited = full_period(start, end)
+            lo, hi = day_bounds(start, end)
+            shown = (lo, hi)
+            note = texts.INFO_FULL_LIMIT if limited else None
+        result = client.raw(logger_value, *shown)
         rows = figures.rows(result.series)
-        fig, keys, bin_s = figures.data_figure(rows, "raw", revision, window=(lo, hi))
-        note = texts.INFO_FULL_LIMIT if limited else None
-        what = _full_what(lo, hi, bin_s)
+        fig, keys, bin_s = figures.data_figure(rows, "raw", revision, window=shown)
+        what = _full_what(*shown, bin_s, zoomed=bool(zoomed))
         mode = "full"
         profile_result = None
-        try:        # the profile: one /daily request set for the same days
+        try:        # the profile: one /daily request set for the days of the range
             profile_result = client.daily(logger_value, start, end)
-            out["profile"] = profile.store_data(api_client.ground_temperature(profile_result.series),
-                                                logger_value)
+            out["profile"] = profile_store(api_client.ground_temperature(profile_result.series), logger_value,
+                                           source=describe(masts, logger_value))
         except api_client.ApiError as e:        # the client logged it
             out["profile"] = profile.empty(logger_value, str(e))
+        window = shown if zoomed else None
     else:
         lo, hi = day_bounds(start, end)
+        window = clip_window(window, (lo, hi)) if window else None
         result = client.daily(logger_value, start, end)
         rows = figures.rows(result.series)
-        fig, keys, _ = figures.data_figure(rows, "daily", revision)
+        fig, keys, _ = figures.data_figure(rows, "daily", revision, x_range=window)
         note = None
-        what = texts.INFO_DAILY.format(start=start.isoformat(), end=end.isoformat())
+        what = _daily_what(start, end, window)
         mode = "daily"
         profile_result = None       # the profile reuses this /daily result
-        out["profile"] = profile.store_data(api_client.ground_temperature(result.series), logger_value)
+        out["profile"] = profile_store(api_client.ground_temperature(result.series), logger_value,
+                                       source=describe(masts, logger_value))
     logger.info("v2 load %s %s %s..%s: %d request(s), API %.2f s, %d bytes, %d rows, %d traces, %.2f s",
                 logger_value, mode, lo.isoformat(), hi.isoformat(), len(result.requests),
                 result.wall_seconds, result.bytes, len(rows), len(keys), time.perf_counter() - t0)
+    title = describe(masts, logger_value, mode)
+    shown_period = shown if mode == "full" else (start, end)
     if not rows:
         out["message"] = _alert(texts.NO_DATA.format(start=start.isoformat(), end=end.isoformat()), "info")
         out["info"] = info_items(what, result, note, profile_result)
+        out["heading"] = heading(title, *shown_period, texts.HEADING_NO_DATA, times=bool(window))
         return out
     out["figure"] = fig
     out["info"] = info_items(what, result, note, profile_result)
+    out["heading"] = heading(title, *shown_period, times=bool(window) and mode == "full")
     out["view"] = {"logger": logger_value, "mode": mode, "range": [lo.isoformat(), hi.isoformat()],
-                   "keys": keys, "note": note}
+                   "keys": keys, "rows": figures.row_layout(rows), "note": note, "window": _iso(window),
+                   "heading": title, "home": [lo.isoformat(), hi.isoformat()], "period": period}
     return out
 
 
+def _daily_what(start: dt.date, end: dt.date, window=None) -> str:
+    what = texts.INFO_DAILY.format(start=start.isoformat(), end=end.isoformat())
+    if window:
+        what += " · " + texts.INFO_ZOOM.format(start=_fmt_time(window[0]), end=_fmt_time(window[1]))
+    return what
+
+
+def window_items(loggers, window) -> list:
+    """[(logger, lo, hi)] of the loggers with data in ``window`` (lo, hi) datetimes, each with
+    its part of the window, in catalogue order."""
+    items = []
+    for lg in loggers or []:
+        first, last = _date(lg.get("first") or lg.get("last")), _date(lg.get("last"))
+        if first is None or last is None:
+            continue
+        part = clip_window(window, day_bounds(first, last))
+        if part is not None:
+            items.append((lg, *part))
+    return items
+
+
 def load_all(client: api_client.Client, mast, logger_value, start: dt.date, end: dt.date,
-             resolution, out):
+             resolution, out, window=None):
     """``load`` for All loggers of ``mast`` (see the module docstring, 7.)."""
     revision = uuid.uuid4().hex[:8]
     t0 = time.perf_counter()
+    period = _iso(day_bounds(start, end))       # the selected period: a pan/zoom stays inside it
     loggers = mast["loggers"]
     note = None
     if resolution == "full":
-        start, end, limited = full_period(start, end)
-        note = texts.INFO_FULL_LIMIT if limited else None
-    lo, hi = day_bounds(start, end)
-    items = overlapping(loggers, start, end)
-    if resolution == "full":
         mode = "full"
-        parts = fetch_each(client.raw, items)
+        zoomed = zoomed_full(window, start, end) if window else None
+        if zoomed:              # the switch keeps the zoom: raw for the window only
+            shown, (lo, hi), limited = zoomed
+            note = texts.INFO_ZOOM_LIMIT if limited else None
+            start, end = lo.date(), hi.date()
+            raw_items = window_items(loggers, shown)
+        else:
+            start, end, limited = full_period(start, end)
+            note = texts.INFO_FULL_LIMIT if limited else None
+            lo, hi = day_bounds(start, end)
+            shown = (lo, hi)
+            raw_items = overlapping(loggers, start, end)
+        items = overlapping(loggers, start, end)
+        parts = fetch_each(client.raw, raw_items)
         joined = join.join([(lg, r.series) for lg, r in parts])
         rows = figures.rows(joined.series)
-        fig, keys, bin_s = figures.data_figure(rows, "raw", revision, window=(lo, hi), changes=joined.changes)
-        what = _full_what(lo, hi, bin_s)
+        fig, keys, bin_s = figures.data_figure(rows, "raw", revision, window=shown, changes=joined.changes)
+        what = _full_what(*shown, bin_s, zoomed=bool(zoomed))
         info = _prefixed(parts, texts.INFO_KIND_RAW)
-        # the profile: one /daily request set per logger with data in the window, in turn
+        # the profile: one /daily request set per logger with data in the range, in turn
         profile_parts = []
         try:
             for lg, a, b in items:
                 profile_parts.append((lg, client.daily(lg["value"], a, b)))
             pj = join.join([(lg, r.series) for lg, r in profile_parts])
-            out["profile"] = profile.store_data(api_client.ground_temperature(pj.series), logger_value)
+            out["profile"] = profile_store(api_client.ground_temperature(pj.series), logger_value, joined.changes,
+                                           describe([mast], logger_value))
         except api_client.ApiError as e:        # the client logged it
             out["profile"] = profile.empty(logger_value, str(e))
         info += _prefixed(profile_parts, texts.INFO_KIND_PROFILE)
+        window = shown if zoomed else None
     else:
         mode = "daily"
+        lo, hi = day_bounds(start, end)
+        window = clip_window(window, (lo, hi)) if window else None
+        items = overlapping(loggers, start, end)
         parts = fetch_each(client.daily, items)
         joined = join.join([(lg, r.series) for lg, r in parts])
         rows = figures.rows(joined.series)
-        fig, keys, _ = figures.data_figure(rows, "daily", revision, changes=joined.changes)
-        what = texts.INFO_DAILY.format(start=start.isoformat(), end=end.isoformat())
+        fig, keys, _ = figures.data_figure(rows, "daily", revision, changes=joined.changes, x_range=window)
+        what = _daily_what(start, end, window)
         info = _prefixed(parts)
-        out["profile"] = profile.store_data(api_client.ground_temperature(joined.series), logger_value)
-    if profile.has_profile(out["profile"]):
-        out["profile"]["changes"] = joined.changes
+        out["profile"] = profile_store(api_client.ground_temperature(joined.series), logger_value, joined.changes,
+                                       describe([mast], logger_value))
     names = [join.short_label(lg) for lg, _ in parts]
     n_requests = sum(len(r.requests) for _, r in info)
     logger.info("v2 load %s %s %s..%s: %d logger(s), %d request(s), API %.2f s, %d bytes, %d rows, "
@@ -433,47 +579,73 @@ def load_all(client: api_client.Client, mast, logger_value, start: dt.date, end:
                 n_requests, sum(r.wall_seconds for _, r in info), sum(r.bytes for _, r in info),
                 len(rows), len(keys), time.perf_counter() - t0)
     out["info"] = info_parts(what, info, note, names)
+    title = describe([mast], logger_value, mode, names)
+    shown_period = shown if mode == "full" else (start, end)
+    times = bool(window) and mode == "full"
     if not rows:
         out["message"] = _alert(texts.NO_DATA_ALL.format(start=start.isoformat(), end=end.isoformat()), "info")
+        out["heading"] = heading(title, *shown_period, texts.HEADING_NO_DATA, times=times)
         return out
     out["figure"] = fig
+    out["heading"] = heading(title, *shown_period, times=times)
     out["view"] = {"logger": logger_value, "mode": mode, "range": [lo.isoformat(), hi.isoformat()],
-                   "keys": keys, "note": note, "loggers": loggers}
+                   "keys": keys, "rows": figures.row_layout(rows), "note": note, "window": _iso(window),
+                   "loggers": loggers, "heading": title, "home": [lo.isoformat(), hi.isoformat()],
+                   "period": period}
     return out
 
 
 def zoom_all(client: api_client.Client, view, window):
     """(series, info parts, logger names) of a zoom with All loggers: /raw for the window per
     logger with data in it, one after the other, joined."""
-    items = []
-    for lg in view["loggers"]:
-        first, last = _date(lg.get("first") or lg.get("last")), _date(lg.get("last"))
-        if first is None or last is None:
-            continue
-        part = clip_window(window, day_bounds(first, last))
-        if part is not None:
-            items.append((lg, *part))
-    parts = fetch_each(client.raw, items)
+    parts = fetch_each(client.raw, window_items(view["loggers"], window))
     joined = join.join([(lg, r.series) for lg, r in parts])
     return joined.series, _prefixed(parts, texts.INFO_KIND_RAW), [join.short_label(lg) for lg, _ in parts]
 
 
+def zoom_window(target, view):
+    """(window, limited) of a zoom or pan to ``target`` (lo, hi): cut to the selected period
+    (``view["period"]``; older views: the loaded range) and, in Full, to at most one year
+    (the year up to the window's end, as full_period; ``limited`` then True). None if the
+    window is outside the period."""
+    period = tuple(parse_time(t) for t in (view.get("period") or view["range"]))
+    window = clip_window(target, period)
+    if window is None or view["mode"] != "full":
+        return (window, False) if window else None
+    first, _, limited = full_period(window[0].date(), window[1].date())
+    if limited:
+        window = (dt.datetime(first.year, first.month, first.day, tzinfo=UTC), window[1])
+    return window, limited
+
+
 def zoom(client: api_client.Client, relayout, view):
-    """(patch, info) of a zoom in Full: /raw for the window (or the stored range on
-    autorange), thinned, the traces' x/y/mode replaced by key; None if nothing to do (Daily,
-    no x range change). Raises ApiError."""
-    if not view or view.get("mode") != "full":
+    """What a relayout of the data figure changes, or None (no x range change, or a window
+    outside the selected period): {"window": the new zoom window [lo, hi] ISO, None after
+    autorange, and in Full "range": what is now loaded (for the view store); in Full also
+    "patch" (the traces' x/y/mode replaced by key from /raw for the window, thinned; the row
+    titles) and "info" and "heading" (the period now drawn)}. A zoom or pan in Full loads
+    the visible window, anywhere in the selected period (zoom_window: a year at most);
+    autorange goes back to the first Full load (``view["home"]``). Daily makes no request.
+    Raises ApiError."""
+    if not view or view.get("mode") not in ("daily", "full"):
         return None
     target = zoom_target(relayout)
     if target is None:
         return None
-    bounds = tuple(parse_time(t) for t in view["range"])
+    note = None
     if target == "overview":
-        window, zoomed = bounds, False
+        window, zoomed = tuple(parse_time(t) for t in (view.get("home") or view["range"])), False
+        note = view.get("note")
     else:
-        window, zoomed = clip_window(target, bounds), True
-        if window is None:
+        clipped = zoom_window(target, view)
+        if clipped is None:
             return None
+        (window, limited), zoomed = clipped, True
+        note = texts.INFO_ZOOM_LIMIT if limited else None
+    out = {"window": _iso(window) if zoomed else None}
+    if view["mode"] != "full":
+        return out
+    out["range"] = _iso(window)
     if view.get("loggers"):         # All loggers
         series, parts, names = zoom_all(client, view, window)
     else:
@@ -481,7 +653,7 @@ def zoom(client: api_client.Client, relayout, view):
         series, parts, names = result.series, [(None, result)], None
     by_key = {sel.key: sel for row in figures.rows(series) for sel in row.items}
     patch = Patch()
-    bins = []
+    bins, bin_of = [], {}
     for i, key in enumerate(view["keys"]):
         if key is None:
             continue
@@ -492,14 +664,21 @@ def zoom(client: api_client.Client, relayout, view):
             d = figures.raw_trace_data(sel, *window)
         if d["bin_seconds"] is not None:
             bins.append(d["bin_seconds"])
+            bin_of[key] = d["bin_seconds"]
         patch["data"][i]["x"] = d["x"]
         patch["data"][i]["y"] = d["y"]
         patch["data"][i]["mode"] = d["mode"]
+    for i, (title, keys) in enumerate(view.get("rows") or []):     # the row titles come first
+        row_bins = [bin_of[k] for k in keys if k in bin_of]
+        patch["layout"]["annotations"][i]["text"] = figures.row_title(
+            title, "raw", max(row_bins) if row_bins else None)
     what = _full_what(window[0], window[1], max(bins) if bins else None, zoomed)
     logger.info("v2 zoom %s %s..%s: %d request(s), API %.2f s, %d bytes", view["logger"],
                 window[0].isoformat(), window[1].isoformat(), sum(len(r.requests) for _, r in parts),
                 sum(r.wall_seconds for _, r in parts), sum(r.bytes for _, r in parts))
-    return patch, info_parts(what, parts, view.get("note"), names)
+    out.update(patch=patch, info=info_parts(what, parts, note, names),
+               heading=heading(view.get("heading"), *window, times=zoomed) if view.get("heading") else None)
+    return out
 
 
 def profile_setup(store):
@@ -515,36 +694,6 @@ def profile_setup(store):
         return 0, 1, {}, None, hidden, texts.PROFILE_NO_GROUND
     first, last = store["first"], profile.last_day(store)
     return first, last, profile.slider_marks(first, last), last, {}, None
-
-
-def profile_label(day: dict, annual, store, station=None) -> str:
-    text = texts.PROFILE_LABEL.format(day=day["day"])
-    if station:
-        text += texts.PROFILE_LABEL_STATION.format(station=station)
-    if annual is not None:
-        text += "; " + texts.PROFILE_LABEL_ANNUAL.format(start=annual["start"], end=annual["end"],
-                                                          valid=annual["valid_days"], days=annual["days"])
-        if annual["days"] < profile.WINDOW_DAYS:
-            text += texts.PROFILE_LABEL_SHORT.format(start=profile.day_text(store["first"]))
-    return text
-
-
-def profile_draw(day_value, envelope, store):
-    """(profile figure, label, day marker patch of the data figure) of a day and envelope,
-    from the store alone (no API request); None without a profile."""
-    if not profile.has_profile(store):
-        return None
-    day = profile.clamp_day(store, day_value)
-    envelope = envelope if envelope in figures.ENVELOPES else "day"
-    depth_max = max(store["depths"])
-    drawn, station = profile.for_day(store, day)     # several stations: the day's one
-    p = profile.day_profile(drawn, day)
-    annual = profile.annual_envelope(drawn, day) if envelope in ("annual", "both") else None
-    fig = figures.profile_figure(p, annual, envelope, store.get("x_range"), depth_max,
-                                 revision=str(store.get("logger")))
-    marker = Patch()    # the day, and the logger change lines (All loggers) kept
-    marker["layout"]["shapes"] = [figures.day_marker(p["day"])] + figures.change_shapes(store.get("changes"))
-    return fig, profile_label(p, annual, store, station), marker
 
 
 # ---- download (T12) ---------------------------------------------------------------------------
@@ -660,26 +809,50 @@ def register(app, client: api_client.Client, download_budget_s: float | None = N
         Output("message", "children"),
         Output("view", "data"),
         Output("profile", "data"),
+        Output("profile-day", "min"),
+        Output("profile-day", "max"),
+        Output("profile-day", "marks"),
+        Output("profile-day", "value"),
+        Output("profile-body", "style"),
+        Output("profile-note", "children"),
+        Output("data-heading", "children"),
         Input("logger", "value"),
         Input("period", "start_date"),
         Input("period", "end_date"),
         Input("resolution", "value"),
         State("masts", "data"),
+        State("view", "data"),
     )
-    def load_data(logger_value, start, end, resolution, masts):
+    def load_data(logger_value, start, end, resolution, masts, view):
+        # the Daily/Full switch keeps a zoom; any other change shows the whole period
+        window = keep_window(view, logger_value) if ctx.triggered_id == "resolution" else None
+
+        def failed(message, reason):
+            """Nothing drawn: an empty figure (never the previous selection's), the heading
+            names the selection and the problem."""
+            try:
+                what = describe(masts, logger_value, resolution)
+            except Exception:       # noqa: BLE001  (the heading must not hide the message)
+                what = None
+            return (figures.empty_figure(""), None, _alert(message, "danger"), None, None, *profile_setup(None),
+                    heading(what, _date(start), _date(end), texts.HEADING_FAILED.format(reason=reason)))
+
         try:
-            r = load(client, logger_value, start, end, resolution, masts)
+            r = load(client, logger_value, start, end, resolution, masts, window)
+            setup = profile_setup(r["profile"])
         except api_client.ApiError as e:        # the client logged it
-            return figures.empty_figure(""), None, _alert(str(e), "danger"), None, None
+            return failed(str(e), str(e))
         except Exception:   # a bug or an unexpected payload: message, log, page stays usable
             logger.exception("v2 load %s %s..%s (%s) failed", logger_value, start, end, resolution)
-            return figures.empty_figure(""), None, _alert(texts.UNEXPECTED, "danger"), None, None
-        return r["figure"], r["info"], r["message"], r["view"], r["profile"]
+            return failed(texts.UNEXPECTED, texts.UNEXPECTED)
+        return (r["figure"], r["info"], r["message"], r["view"], r["profile"], *setup, r["heading"])
 
     @app.callback(
         Output("data-graph", "figure", allow_duplicate=True),
         Output("info", "children", allow_duplicate=True),
         Output("message", "children", allow_duplicate=True),
+        Output("view", "data", allow_duplicate=True),
+        Output("data-heading", "children", allow_duplicate=True),
         Input("data-graph", "relayoutData"),
         State("view", "data"),
         prevent_initial_call=True,
@@ -688,31 +861,24 @@ def register(app, client: api_client.Client, download_budget_s: float | None = N
         try:
             r = zoom(client, relayout, view)
         except api_client.ApiError as e:        # the client logged it
-            return no_update, no_update, _alert(str(e), "danger")
+            return no_update, no_update, _alert(str(e), "danger"), no_update, no_update
         except Exception:
             logger.exception("v2 zoom failed (%s)", relayout)
-            return no_update, no_update, _alert(texts.UNEXPECTED, "danger")
+            return no_update, no_update, _alert(texts.UNEXPECTED, "danger"), no_update, no_update
         if r is None:
-            return no_update, no_update, no_update
-        return r[0], r[1], None
+            return no_update, no_update, no_update, no_update, no_update
+        window = Patch()            # the zoom, for the Daily/Full switch; Full: what is loaded
+        window["window"] = r["window"]
+        if "range" in r:
+            window["range"] = r["range"]
+        if "patch" not in r:        # Daily: no request, nothing redrawn
+            return no_update, no_update, no_update, window, no_update
+        return r["patch"], r["info"], None, window, r["heading"] or no_update
 
-    @app.callback(
-        Output("profile-day", "min"),
-        Output("profile-day", "max"),
-        Output("profile-day", "marks"),
-        Output("profile-day", "value"),
-        Output("profile-body", "style"),
-        Output("profile-note", "children"),
-        Input("profile", "data"),
-    )
-    def setup_profile(store):
-        try:
-            return profile_setup(store)
-        except Exception:
-            logger.exception("v2 profile setup failed")
-            return 0, 1, {}, None, {"display": "none"}, _alert(texts.UNEXPECTED, "danger")
-
-    @app.callback(
+    # the profile: drawn in the browser from the store (assets/profile.js), also while the
+    # slider is dragged; no request
+    app.clientside_callback(
+        ClientsideFunction(namespace="nuki", function_name="profile"),
         Output("profile-graph", "figure"),
         Output("profile-label", "children"),
         Output("data-graph", "figure", allow_duplicate=True),
@@ -721,15 +887,6 @@ def register(app, client: api_client.Client, download_budget_s: float | None = N
         Input("profile", "data"),
         prevent_initial_call=True,
     )
-    def draw_profile(day_value, envelope, store):
-        try:
-            r = profile_draw(day_value, envelope, store)
-        except Exception:
-            logger.exception("v2 profile draw failed (day %s, %s)", day_value, envelope)
-            return figures.empty_figure(texts.UNEXPECTED, figures.PROFILE_HEIGHT), None, no_update
-        if r is None:
-            return figures.empty_figure("", figures.PROFILE_HEIGHT), None, no_update
-        return r
 
     @app.callback(
         Output("download-loggers", "options"),

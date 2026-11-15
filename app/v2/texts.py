@@ -28,8 +28,8 @@ PERIOD = "Period"
 RESOLUTION = "Values"
 RES_DAILY = "Daily"
 RES_FULL = "Full"
-RESOLUTION_HELP = ("Daily: daily mean with the day's minimum and maximum. Full: every "
-                   "measurement, at most one year; zoom in for full detail.")
+RESOLUTION_HELP = ("Daily: the daily mean. Full: every measurement, at most one year; zoom "
+                   "in for full detail. A zoom is kept when you switch.")
 
 # ---- messages -------------------------------------------------------------------------------
 MASTS_UNAVAILABLE = "The list of masts could not be loaded. {reason}"
@@ -43,7 +43,7 @@ UNEXPECTED = "Something went wrong while preparing the plots. Please try again."
 
 # ---- info line ------------------------------------------------------------------------------
 # what the figure shows
-INFO_DAILY = "Daily means with daily minimum and maximum, {start} to {end}"
+INFO_DAILY = "Daily means, {start} to {end}"
 INFO_FULL = "Every measurement, {start} to {end}"
 INFO_THINNED = ("{start} to {end}, thinned to the minimum and maximum per ~{bin} "
                 "(zoom in for every measurement)")
@@ -51,6 +51,9 @@ INFO_ZOOM = "Zoomed to {start} to {end}"
 # a Full range longer than one year loads the year up to its end date
 INFO_FULL_LIMIT = ("Full resolution is limited to one year: showing the last year "
                    "of the chosen period.")
+# the Daily/Full switch keeps a zoom: a zoomed window longer than one year loads its last year
+INFO_ZOOM_LIMIT = ("Full resolution is limited to one year: showing the last year "
+                   "of the zoomed window.")
 # the API part: {requests} count, {seconds} wall time, {size} e.g. "12 KB"
 INFO_REQUESTS = "{requests} request(s), {seconds:.2f} s, {size}"
 INFO_DETAILS = "Requests"
@@ -64,6 +67,18 @@ INFO_KIND_PROFILE = "daily, for the profile"
 INFO_LOGGERS = "Loggers: {loggers}"
 INFO_NO_LOGGER = "no logger has data in this period"
 
+# ---- heading of the figure card: what is drawn (T16) --------------------------------------
+# the parts, joined by HEADING_SEP: mast, station(s), logger (or HEADING_ALL), the values
+# (HEADING_DAILY / HEADING_FULL) and the period (HEADING_PERIOD)
+HEADING_SEP = " · "
+HEADING_ALL = "All loggers: {loggers}"
+HEADING_DAILY = "Daily means"
+HEADING_FULL = "Full resolution"
+HEADING_PERIOD = "{start} to {end}"
+# after the selection when nothing is drawn for it
+HEADING_NO_DATA = "no data"
+HEADING_FAILED = "not loaded: {reason}"
+
 # ---- figure ---------------------------------------------------------------------------------
 FIGURE_EMPTY = "Choose a mast and a logger to see its data."
 ROW_GROUND = "Ground temperature"
@@ -74,6 +89,10 @@ ROW_INCLINATION = "Inclination {name}"
 ROW_HEADING = "Compass heading"
 ROW_SENSOR_TEMPERATURE = "Sensor temperature"
 ROW_BATTERY = "Battery voltage"
+# the row title says what is shown ({title} one of the ROW_ texts above; {bin} e.g. "6 h")
+ROW_DAILY = "{title}, daily mean"
+ROW_FULL = "{title}, all measurements"
+ROW_THINNED = "{title}, thinned (min/max per ~{bin})"
 # {name} the series label, {unit} its unit (may be empty)
 HOVER_DAILY = ("%{{x|%Y-%m-%d}}<br>mean %{{y:.3f}} {unit}<br>"
                "min %{{customdata[0]:.3f}} · max %{{customdata[1]:.3f}}<extra>{name}</extra>")
@@ -134,7 +153,7 @@ DOWNLOAD_INTRO = ("An Excel workbook with every measurement (one \"full\" sheet 
 DOWNLOAD_FROM = "From year"
 DOWNLOAD_TO = "To year"
 DOWNLOAD_LOGGERS = "Loggers"
-DOWNLOAD_ALL = "All"
+DOWNLOAD_ALL = "Toggle all recording devices at this station"
 DOWNLOAD_BUTTON = "Download Excel file"
 DOWNLOAD_RUNNING = "Preparing the file..."
 DOWNLOAD_CHOOSE_YEARS = "Choose the years to download."

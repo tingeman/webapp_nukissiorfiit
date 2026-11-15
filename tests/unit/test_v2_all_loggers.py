@@ -114,7 +114,7 @@ class DailyTest(AllLoggersCase):
         self.assertEqual(view["mode"], "daily")
         self.assertEqual([lg["value"] for lg in view["loggers"]], [TEKBOX_M6, CAMPBELL_M6])
         self.assertEqual((store["n"], store["depths"]), (35, [0.1, 0.25, 0.5]))
-        self.assertEqual([c["logger"] for c in store["changes"]], [CAMPBELL_M6])
+        self.assertEqual([c["x0"] for c in store["shapes"]], ["2026-10-01 00:00:00"])
 
     def test_daily_one_logger_in_range(self):
         """Daily with a range of one logger only: one /daily request (the other logger is not asked), no marker"""
@@ -264,40 +264,39 @@ class ZoomTest(AllLoggersCase):
 
 
 class ProfileTest(AllLoggersCase):
-    def draw(self, day_value, store):
-        r = self.call([("profile-graph", "figure"), ("profile-label", "children"), ("data-graph", "figure")],
-                      [("profile-day", "value", day_value), ("profile-envelope", "value", "both"),
-                       ("profile", "data", store)])
-        return r["profile-graph"]["figure"], r["profile-label"]["children"], r["data-graph"]["figure"]
+    def values(self, store, d):
+        """(station or None, the day's mean per drawn depth) as the JS picks them."""
+        i = profile.day_number(d) - store["first"]
+        station = store["station_list"][store["day_station"][i]] if "day_station" in store else None
+        rows = [r for r in range(len(store["keys"])) if station is None or store["stations"][r] == station]
+        return station, [store["mean"][r][i] for r in rows if store["mean"][r][i] is not None]
 
     def test_profile_mast6(self):
-        """profile from the joined ground temperatures (Mast 6): the Campbell on its days, the Tekbox on its days; the day marker keeps the change line; no request"""
+        """profile from the joined ground temperatures (Mast 6): the Campbell on its days, the Tekbox on its days; the store keeps the change line for the day marker; no request"""
         *_, store = self.load_mast(ALL_M6, "2026-09-01", "2026-10-05")
         self.server.requests.clear()
-        fig, label, patch = self.draw(profile.day_number("2026-10-03"), store)
-        mean = next(t for t in fig["data"] if t["meta"] == "mean")
-        self.assertLess(mean["x"][0], -1.0)                     # Campbell node 1: -1.1 ...
-        fig, label, _ = self.draw(profile.day_number("2026-09-03"), store)
-        mean = next(t for t in fig["data"] if t["meta"] == "mean")
-        self.assertGreater(mean["x"][0], -0.5)                  # Tekbox node 1: -0.1 ...
-        shapes = patch["operations"][0]["params"]["value"]
-        self.assertEqual(len(shapes), 2)
-        self.assertEqual(shapes[1]["x0"], "2026-10-01 00:00:00")
-        self.assertNotIn("station", label)
+        station, mean = self.values(store, "2026-10-03")
+        self.assertIsNone(station)
+        self.assertLess(mean[0], -1.0)                          # Campbell node 1: -1.1 ...
+        _, mean = self.values(store, "2026-09-03")
+        self.assertGreater(mean[0], -0.5)                       # Tekbox node 1: -0.1 ...
+        self.assertEqual([s["x0"] for s in store["shapes"]], ["2026-10-01 00:00:00"])
+        self.assertNotIn("station_list", store)
         self.assertEqual(self.server.requests, [])
 
     def test_profile_mast9(self):
-        """profile of Mast 9 (two stations): the station whose logger has data on the chosen day, named in the label"""
+        """profile of Mast 9 (two stations): per day the station whose logger has data on it (the latest before it between the loggers), its envelope from that station only"""
         *_, store = self.load_mast(ALL_M9, "2024-10-14", "2026-10-05")
-        fig, label, _ = self.draw(profile.day_number("2024-10-16"), store)
-        self.assertIn(texts.PROFILE_LABEL_STATION.format(station="SIS2024-03"), label)
-        mean = next(t for t in fig["data"] if t["meta"] == "mean")
-        self.assertEqual(len(mean["y"]), 3)
-        fig, label, _ = self.draw(profile.day_number("2026-10-03"), store)
-        self.assertIn(texts.PROFILE_LABEL_STATION.format(station="NUKI2026-M9"), label)
-        mean = next(t for t in fig["data"] if t["meta"] == "mean")
-        self.assertEqual(len(mean["y"]), 3)
-        self.assertLess(mean["x"][0], -3.0)
+        self.assertEqual(sorted(store["station_list"]), ["NUKI2026-M9", "SIS2024-03"])
+        station, mean = self.values(store, "2024-10-16")
+        self.assertEqual((station, len(mean)), ("SIS2024-03", 3))
+        station, mean = self.values(store, "2026-10-03")
+        self.assertEqual((station, len(mean)), ("NUKI2026-M9", 3))
+        self.assertLess(mean[0], -3.0)
+        self.assertEqual(self.values(store, "2025-06-01")[0], "SIS2024-03")
+        i = profile.day_number("2026-10-03") - store["first"]
+        self.assertEqual(store["valid"][i], 3)          # NUKI2026-M9's 3 days, not SIS2024-03's 5
+        self.assertIn("{station}", store["draw"]["texts"]["station"])
 
 
 if __name__ == "__main__":

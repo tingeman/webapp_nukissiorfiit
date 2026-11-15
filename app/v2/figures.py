@@ -5,22 +5,25 @@ is made here.
     rows(series)                       -> [Row]: the rows of the figure that have data
     data_figure(rows, mode, revision)  -> one make_subplots figure, shared x axes
     raw_trace_data(selected, lo, hi)   -> x, y and mode of one Full trace (thinned to the window)
+    row_title(title, mode, bin_s)      -> the title above a row (what it shows)
+    row_layout(rows)                   -> [[title, [trace keys]]] per row (the zoom's titles)
     empty_figure(message)              -> a placeholder with a message
-    profile_figure(day, annual, ...)   -> the ground temperature profile of one day (T10)
+    profile_spec(store, revision)      -> the profile figure template for the browser (T16)
     day_marker(day)                    -> a shape marking that day on the data figure
     change_shapes(changes)             -> dashed lines at the logger changes (T11)
 
 Rows, top to bottom, each left out without data: ground temperature (one line per depth,
 taller), air temperature, relative humidity, barometric pressure (kPa), one row per
 inclination angle (own y scale), compass heading, sensor temperature, battery voltage. Each
-row has its own legend (Plotly's legend, legend2, ...) next to it.
+row has its own legend (Plotly's legend, legend2, ...) next to it, its own date tick labels
+(the x axes stay matched) and a title saying what it shows ("..., daily mean", "..., all
+measurements" or "..., thinned (min/max per ~6 h)"; annotations named ``row:<key>``).
 
-Daily (``mode="daily"``): per series a mean line and a band from the daily minimum to the
-daily maximum (two traces without legend entry before the line, the lower one filled to
-the upper). Full (``mode="raw"``): one line per series, thinned by rawseries.thin_series to
-about MAX_POINTS points, with ``meta`` = the API column key, so that a zoom can replace the
-data trace by trace (callbacks.py). Lines break at gaps (daily: a missing day; raw: as
-rawseries).
+Daily (``mode="daily"``): per series one line of the daily means (no min/max band; the
+hover shows the day's min and max). Full (``mode="raw"``): one line per series, thinned by
+rawseries.thin_series to about MAX_POINTS points. Every trace has ``meta`` = the API column
+key, so that a zoom can replace the data trace by trace (callbacks.py). Lines break at gaps
+(daily: a missing day; raw: as rawseries).
 
 All loggers (T11): the series come from join.join (one series per depth or series name and
 station, spanning the loggers). A joined series' line breaks at every logger change (its
@@ -56,11 +59,9 @@ DEPTH_SCALE_RANGE = (0.78, 0.02)
 # other rows: a few distinct colours (Tableau 10)
 PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2",
            "#7f7f7f", "#bcbd22", "#17becf"]
-BAND_ALPHA = 0.18
-
 ROW_PX = 150            # plot height of a row
 GROUND_PX = 320         # ... of the ground temperature row
-GAP_PX = 46             # between rows (room for the row title)
+GAP_PX = 84             # between rows: the row's date tick labels (2 lines) and the next title
 MARGIN = dict(l=70, r=150, t=40, b=40)
 EMPTY_HEIGHT = 420
 
@@ -248,12 +249,47 @@ def _axis_suffix(r: int) -> str:
     return "" if r == 1 else str(r)
 
 
-def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=None, changes=None):
+def bin_text(seconds: float) -> str:
+    """A bin width as people say it: '30 s', '15 min', '6 h', '2 d' (as TSP)."""
+    if round(seconds) < 60:
+        return f"{max(round(seconds), 1)} s"
+    if round(seconds / 60) < 60:
+        return f"{round(seconds / 60)} min"
+    if round(seconds / 3600) < 48:
+        return f"{round(seconds / 3600)} h"
+    return f"{round(seconds / 86400)} d"
+
+
+def row_title(title: str, mode: str, bin_seconds=None) -> str:
+    """The title above a row (``title``: Row.title): what it shows (daily means; every
+    measurement; thinned, with the row's largest bin width)."""
+    if mode != "raw":
+        return texts.ROW_DAILY.format(title=title)
+    if bin_seconds is None:
+        return texts.ROW_FULL.format(title=title)
+    return texts.ROW_THINNED.format(title=title, bin=bin_text(bin_seconds))
+
+
+def row_layout(rows_: list) -> list:
+    """[[Row.title, [the API column keys of its traces]]] per row, in figure order: what the
+    zoom needs (``view`` store) to rewrite the row titles of the window it loads."""
+    return [[row.title, [sel.key for sel in row.items]] for row in rows_]
+
+
+def row_name(row: Row) -> str:
+    """The ``name`` of a row's title annotation (the zoom patches the text by it)."""
+    return f"row:{row.key}"
+
+
+def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=None, changes=None,
+                x_range=None):
     """(figure, trace keys, bin seconds) of the rows. ``changes``: the logger changes of
     joined series (join.Joined.changes), drawn as dashed lines with the logger's name.
     ``mode`` "daily" (DailySeries) or
-    "raw" (RawSeries, thinned to ``window`` (lo, hi) datetimes). Trace keys: the API column key
-    of every trace in figure order (None for the band traces), for the zoom's Patch.
+    "raw" (RawSeries, thinned to ``window`` (lo, hi) datetimes, which is also the x range).
+    ``x_range`` (lo, hi) datetimes: the x range of a daily figure (a zoom kept across the
+    Daily/Full switch; default: the data). Trace keys: the API column key of every trace in
+    figure order, for the zoom's Patch.
     ``revision`` is the figure's uirevision (a new value resets the user's zoom). Bin
     seconds: the largest bin width of a thinned series (None: nothing thinned)."""
     if not rows_:
@@ -265,6 +301,7 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
                         vertical_spacing=GAP_PX / plot_px if n > 1 else 0,
                         subplot_titles=[r.title for r in rows_])
     keys, bins = [], []
+    row_bins = []           # per row: its largest bin width (None: not thinned)
     raw = mode == "raw"
     stations = list(dict.fromkeys(join.station(sel) for row in rows_ for sel in row.items))
     by_station = len(stations) > 1      # joined series of several stations (Mast 9)
@@ -273,6 +310,7 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
         unit = unit_text(row.unit)
         many = len(row.items) > 1 or by_station
         titled = set()
+        this_row = []
         for sel, color in zip(row.items, row_colors(row)):
             group = f"{row.key}|{sel.key}"
             common = dict(name=sel.label, legend=legend, legendgroup=group, showlegend=many)
@@ -291,6 +329,7 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
                 d = raw_trace_data(sel, *window, max_points=max_points)
                 if d["bin_seconds"] is not None:
                     bins.append(d["bin_seconds"])
+                    this_row.append(d["bin_seconds"])
                 fig.add_trace(go.Scatter(
                     x=d["x"], y=d["y"], mode=d["mode"], meta=sel.key, connectgaps=False,
                     line=dict(color=color, width=1.4, dash=dash), marker=dict(color=color, size=4),
@@ -299,17 +338,13 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
                 keys.append(sel.key)
                 continue
             d = daily_trace_data(sel.series)
-            band = dict(x=d["x"], mode="lines", line=dict(width=0, color=color), hoverinfo="skip",
-                        connectgaps=False, legend=legend, legendgroup=group, showlegend=False)
-            fig.add_trace(go.Scatter(y=d["max"], **band), row=r, col=1)
-            fig.add_trace(go.Scatter(y=d["min"], fill="tonexty", fillcolor=_rgba(color, BAND_ALPHA),
-                                     **band), row=r, col=1)
             fig.add_trace(go.Scatter(
                 x=d["x"], y=d["mean"], customdata=list(zip(d["min"], d["max"])), mode="lines",
-                connectgaps=False, line=dict(color=color, width=1.5, dash=dash),
+                meta=sel.key, connectgaps=False, line=dict(color=color, width=1.5, dash=dash),
                 hovertemplate=texts.HOVER_DAILY.format(name=name, unit=hover_unit),
                 **common), row=r, col=1)
-            keys.extend([None, None, sel.key])
+            keys.append(sel.key)
+        row_bins.append(max(this_row) if this_row else None)
         fig.update_yaxes(title=dict(text=unit, standoff=6), row=r, col=1)
     height = plot_px + MARGIN["t"] + MARGIN["b"]
     fig.update_layout(**_base_layout(height), margin=MARGIN, hovermode="x unified",
@@ -318,17 +353,20 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
         fig.update_layout(shapes=change_shapes(changes))
     axis = dict(showgrid=True, gridcolor=GRID, showline=True, linecolor=AXIS, ticks="outside",
                 tickcolor=AXIS, zeroline=False)
-    fig.update_xaxes(type="date", **axis)
+    # every row its own date tick labels (make_subplots shows them on the bottom row only)
+    fig.update_xaxes(type="date", showticklabels=True, **axis)
     fig.update_yaxes(**axis)
-    if window is not None:
-        fig.update_xaxes(range=[_plotly_time(t) for t in window])
+    shown = window if raw else x_range
+    if shown is not None:
+        fig.update_xaxes(range=[_plotly_time(t) for t in shown])
     for r in range(1, n + 1):
         top = fig.layout[f"yaxis{_axis_suffix(r)}"].domain[1]
         fig.update_layout({f"legend{_axis_suffix(r)}": dict(
             x=1.01, xanchor="left", y=top, yanchor="top", font=dict(size=12),
             bgcolor="rgba(255,255,255,0)", itemclick="toggle", itemdoubleclick="toggleothers")})
-    for a in fig.layout.annotations:        # the row titles, left-aligned above each row
-        a.update(x=0, xanchor="left", font=dict(size=13, color=MUTED))
+    for a, row, b in zip(fig.layout.annotations, rows_, row_bins):  # the row titles, left-aligned
+        a.update(x=0, xanchor="left", font=dict(size=13, color=MUTED), name=row_name(row),
+                 text=row_title(row.title, mode, b))
     for c in changes or []:                 # the logger names, above the top row
         fig.add_annotation(x=_change_x(c), xref="x", y=1, yref="paper", yanchor="bottom",
                            xanchor="left", text=texts.CHANGE_LABEL.format(logger=c["label"]),
@@ -358,7 +396,7 @@ def _plotly_time(t) -> str:
     return t.strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ---- ground temperature profile (T10) ---------------------------------------------------------
+# ---- ground temperature profile (T10, T16) ----------------------------------------------------
 
 PROFILE_HEIGHT = 460
 PROFILE_MARGIN = dict(l=70, r=20, t=60, b=20)
@@ -368,56 +406,75 @@ ANNUAL_MIN_COLOR = "#1f77b4"
 DAY_BAND_ALPHA = 0.22
 DAY_MARKER_COLOR = "rgba(29, 79, 145, 0.55)"
 ENVELOPES = ("day", "annual", "both")
+# the traces of each envelope choice, in drawing order (meta of each trace)
+ENVELOPE_TRACES = {"day": ["day-band", "mean"],
+                   "annual": ["annual-max", "annual-min", "mean"],
+                   "both": ["annual-max", "annual-min", "day-band", "mean"]}
 
 
-def profile_figure(day: dict, annual: dict | None, envelope: str, x_range, depth_max: float,
-                   revision: str) -> go.Figure:
-    """Temperature (x) against depth (y, negative down, m) of one day (profile.day_profile):
-    the daily mean, with the day's min/max band (``envelope`` "day" or "both") and/or the
-    annual envelope's max and min curves (profile.annual_envelope; "annual" or "both").
-    Every trace has ``meta``: "day-band", "annual-max", "annual-min", "mean". The axes are
-    fixed by ``x_range`` (°C) and ``depth_max`` (m), so they do not move while sliding;
-    ``revision`` is the uirevision (the user's zoom stays while sliding)."""
-    envelope = envelope if envelope in ENVELOPES else "day"
-    fig = go.Figure()
-    if envelope in ("annual", "both") and annual and annual["depths"]:
-        y = [-d for d in annual["depths"]]
-        for key, name, color in (("max", texts.PROFILE_ANNUAL_MAX, ANNUAL_MAX_COLOR),
-                                 ("min", texts.PROFILE_ANNUAL_MIN, ANNUAL_MIN_COLOR)):
-            fig.add_trace(go.Scatter(
-                x=annual[key], y=y, name=name, meta=f"annual-{key}", mode="lines+markers",
-                customdata=[f"{v:+0.2f} m" for v in y], line=dict(color=color, width=1.6, dash="dash"),
-                marker=dict(color=color, size=5), hovertemplate=texts.HOVER_PROFILE.format(name=name)))
-    if day["depths"]:
-        y = [-d for d in day["depths"]]
-        if envelope in ("day", "both"):
-            fig.add_trace(go.Scatter(
-                x=day["max"] + day["min"][::-1], y=y + y[::-1], name=texts.PROFILE_DAY_BAND,
-                meta="day-band", mode="lines", fill="toself", line=dict(width=0, color=MEAN_COLOR),
-                fillcolor=_rgba(MEAN_COLOR, DAY_BAND_ALPHA), hoverinfo="skip"))
-        fig.add_trace(go.Scatter(
-            x=day["mean"], y=y, name=texts.PROFILE_MEAN, meta="mean", mode="lines+markers",
-            customdata=list(zip(day["labels"], day["min"], day["max"])),
-            line=dict(color=MEAN_COLOR, width=2), marker=dict(color=MEAN_COLOR, size=6),
-            hovertemplate=texts.HOVER_PROFILE_MEAN.format(name=texts.PROFILE_MEAN)))
-    annotations = []
-    if not day["depths"]:
-        annotations.append(dict(text=texts.PROFILE_NO_DAY.format(day=day["day"]), x=0.5, y=0.5,
-                                xref="paper", yref="paper", showarrow=False, font=dict(size=15, color=MUTED)))
+def _profile_traces() -> dict:
+    """The profile's traces by meta, without x, y and customdata (the browser fills them):
+    the annual envelope's max and min curves (dashed), the day's min/max band and the daily
+    mean (hover: depth label, day min and max)."""
+    out = {}
+    for key, name, color in (("max", texts.PROFILE_ANNUAL_MAX, ANNUAL_MAX_COLOR),
+                             ("min", texts.PROFILE_ANNUAL_MIN, ANNUAL_MIN_COLOR)):
+        out[f"annual-{key}"] = dict(
+            type="scatter", name=name, meta=f"annual-{key}", mode="lines+markers",
+            line=dict(color=color, width=1.6, dash="dash"), marker=dict(color=color, size=5),
+            hovertemplate=texts.HOVER_PROFILE.format(name=name))
+    out["day-band"] = dict(
+        type="scatter", name=texts.PROFILE_DAY_BAND, meta="day-band", mode="lines", fill="toself",
+        line=dict(width=0, color=MEAN_COLOR), fillcolor=_rgba(MEAN_COLOR, DAY_BAND_ALPHA),
+        hoverinfo="skip")
+    out["mean"] = dict(
+        type="scatter", name=texts.PROFILE_MEAN, meta="mean", mode="lines+markers",
+        line=dict(color=MEAN_COLOR, width=2), marker=dict(color=MEAN_COLOR, size=6),
+        hovertemplate=texts.HOVER_PROFILE_MEAN.format(name=texts.PROFILE_MEAN))
+    return out
+
+
+def profile_layout(x_range, depth_max: float, revision: str) -> dict:
+    """The profile figure's layout: temperature (x, top) against depth (y, negative down,
+    m), fixed by ``x_range`` (°C) and ``depth_max`` (m) so that the axes do not move while
+    sliding; ``revision`` is the uirevision (the user's zoom stays while sliding)."""
     lo, hi = x_range or [-10, 10]
     pad = 0.04 * (hi - lo)
     axis = dict(showgrid=True, gridcolor=GRID, showline=True, linecolor=AXIS, mirror=True,
                 ticks="outside", tickcolor=AXIS, zeroline=False)
-    fig.update_layout(
-        **_base_layout(PROFILE_HEIGHT), margin=PROFILE_MARGIN, hovermode="closest",
+    base = _base_layout(PROFILE_HEIGHT)
+    del base["template"]    # a plotly.py name: plotly.js's own defaults are as plain
+    return dict(
+        base, margin=PROFILE_MARGIN, hovermode="closest",
         xaxis=dict(axis, title=dict(text=texts.PROFILE_XAXIS), side="top", range=[lo - pad, hi + pad]),
         yaxis=dict(axis, title=dict(text=texts.PROFILE_YAXIS), range=[-1.08 * (depth_max or 1.0), 0]),
         legend=dict(x=0.01, y=0.01, xanchor="left", yanchor="bottom", bgcolor="rgba(255,255,255,0.85)",
                     bordercolor=GRID, borderwidth=1, font=dict(size=12)),
         shapes=[dict(type="line", xref="x", yref="paper", x0=0, x1=0, y0=0, y1=1,
                      line=dict(color=AXIS, width=1.2, dash="dot"), layer="below")],
-        annotations=annotations, uirevision=revision)
-    return fig
+        annotations=[], uirevision=revision)
+
+
+def profile_spec(store: dict, revision: str) -> dict:
+    """What the browser needs besides the store's numbers to draw the profile of any day
+    (assets/profile.js; kept in the store as ``"draw"``), so the drawing rules stay here:
+
+        {"layout": profile_layout(...), "traces": {meta: trace properties},
+         "envelopes": ENVELOPE_TRACES, "no_day": the annotation of a day without data (its
+         text a template with {day}), "marker": the day marker on the data figure
+         (day_marker without x0/x1), "texts": the label templates (texts.py, str.format
+         fields: {day}, {station}, {start}, {end}, {valid}, {days})}"""
+    marker = day_marker("2000-01-01")
+    del marker["x0"], marker["x1"]
+    return {
+        "layout": profile_layout(store.get("x_range"), store.get("depth_max") or 1.0, revision),
+        "traces": _profile_traces(), "envelopes": ENVELOPE_TRACES,
+        "no_day": dict(text=texts.PROFILE_NO_DAY, x=0.5, y=0.5, xref="paper", yref="paper",
+                       showarrow=False, font=dict(size=15, color=MUTED)),
+        "marker": marker,
+        "texts": {"label": texts.PROFILE_LABEL, "station": texts.PROFILE_LABEL_STATION,
+                  "annual": "; " + texts.PROFILE_LABEL_ANNUAL, "short": texts.PROFILE_LABEL_SHORT},
+    }
 
 
 def day_marker(day: str) -> dict:

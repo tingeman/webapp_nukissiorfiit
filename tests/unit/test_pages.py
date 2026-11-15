@@ -109,7 +109,8 @@ class PagesTest(unittest.TestCase):
         # each app's callbacks are its own functions (both pages may use ids like "logger", so
         # equal keys alone do not mean a callback was copied over)
         self.assertEqual({cb["callback"].__module__ for cb in classic.values()}, {"app"})
-        self.assertEqual({cb["callback"].__module__ for cb in new.values()}, {"v2.callbacks"})
+        # (the v2 profile is drawn by a clientside callback: no Python function, T16)
+        self.assertEqual({cb["callback"].__module__ for cb in new.values() if "callback" in cb}, {"v2.callbacks"})
 
     def test_no_global_callback_decorator(self):
         """app.py and app/v2/ register callbacks with app.callback, never the global dash.callback"""

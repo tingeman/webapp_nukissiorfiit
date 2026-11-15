@@ -18,7 +18,7 @@ from support import APP_DIR, ApiTestCase, config, fake_api
 
 import app  # noqa: E402  (the production server with both pages)
 import v2  # noqa: E402
-from v2 import callbacks, figures, texts  # noqa: E402
+from v2 import api_client, callbacks, figures, texts  # noqa: E402
 from v2.api_client import Client  # noqa: E402
 
 TEKBOX_M6 = "deveui:feedbeefcafe0002"          # device 10, 2026-09-01..05
@@ -61,7 +61,17 @@ def text_of(node) -> str:
 
 
 def row_titles(fig):
-    return [a["text"] for a in fig["layout"].get("annotations", [])]
+    """The annotation texts, row titles without what they show (", daily mean", ...)."""
+    return [a["text"].split(", ")[0] for a in fig["layout"].get("annotations", [])]
+
+
+def full_titles(fig):
+    """The row titles as shown (with what the row shows)."""
+    return [a["text"] for a in fig["layout"].get("annotations", []) if str(a.get("name", "")).startswith("row:")]
+
+
+PROFILE_OUTPUTS = [("profile-day", "min"), ("profile-day", "max"), ("profile-day", "marks"),
+                   ("profile-day", "value"), ("profile-body", "style"), ("profile-note", "children")]
 
 
 class PageTestCase(ApiTestCase):
@@ -98,14 +108,17 @@ class PageTestCase(ApiTestCase):
         return self.call([("masts", "data"), ("mast", "options"), ("mast", "value"),
                           ("masts-message", "children")], [("url", "pathname", v2.URL_PREFIX)])
 
-    def load_all(self, logger, start, end, resolution="daily", masts=None):
-        """load_data: (figure, info children, message children, view, profile store).
-        ``masts``: the catalogue store (needed for All loggers only)."""
+    def load_all(self, logger, start, end, resolution="daily", masts=None, view=None, changed=None):
+        """load_data: (figure, info children, message children, view, profile store); the
+        whole answer (also the profile slider and body) in self.loaded. ``masts``: the
+        catalogue store (needed for All loggers only); ``view``: the view store before (the
+        Daily/Full switch, ``changed="resolution.value"``, keeps its window)."""
         r = self.call([("data-graph", "figure"), ("info", "children"), ("message", "children"),
-                       ("view", "data"), ("profile", "data")],
+                       ("view", "data"), ("profile", "data")] + PROFILE_OUTPUTS + [("data-heading", "children")],
                       [("logger", "value", logger), ("period", "start_date", start),
                        ("period", "end_date", end), ("resolution", "value", resolution)],
-                      state=[("masts", "data", masts)])
+                      state=[("masts", "data", masts), ("view", "data", view)], changed=changed)
+        self.loaded = r
         return (r["data-graph"]["figure"], r["info"]["children"], r["message"]["children"],
                 r["view"]["data"], r["profile"]["data"])
 
@@ -114,7 +127,8 @@ class PageTestCase(ApiTestCase):
         return self.load_all(logger, start, end, resolution)[:4]
 
     def zoom(self, relayout, view):
-        return self.call([("data-graph", "figure"), ("info", "children"), ("message", "children")],
+        return self.call([("data-graph", "figure"), ("info", "children"), ("message", "children"),
+                          ("view", "data"), ("data-heading", "children")],
                          [("data-graph", "relayoutData", relayout)], state=[("view", "data", view)])
 
     def measurement_requests(self):
@@ -131,8 +145,29 @@ class LayoutTest(unittest.TestCase):
         """the v2 layout has the selectors, the store, the info line, the message and the figure"""
         for cid in ("classic-link", "url", "masts", "masts-message", "mast", "logger", "period",
                     "resolution", "message", "info", "data-graph", "view", "profile", "profile-note",
-                    "profile-body", "profile-day", "profile-envelope", "profile-label", "profile-graph"):
+                    "profile-body", "profile-day", "profile-envelope", "profile-label", "profile-graph",
+                    "profile-card", "download-card", "data-heading"):
             self.assertIn(cid, self.by_id)
+
+    def test_cards_side_by_side(self):
+        """the profile (lg=8) and the download card (lg=4) sit side by side on lg+ screens, top-aligned, not stretched; full width (stacked) below lg"""
+        rows = [c for c in app.v2_app.layout._traverse() if type(c).__name__ == "Row"
+                and {getattr(getattr(col, "children", None), "id", None) for col in c.children
+                     if type(col).__name__ == "Col"} == {"profile-card", "download-card"}]
+        self.assertEqual(len(rows), 1)
+        cols = rows[0].children
+        self.assertEqual([col.children.id for col in cols], ["profile-card", "download-card"])
+        self.assertEqual([(col.xs, col.lg) for col in cols], [(12, 8), (12, 4)])
+        self.assertIn("align-items-start", rows[0].className)
+        for col in cols:
+            self.assertNotIn("h-100", col.children.className)
+        # download card: stacked top to bottom, the button directly after the logger checklist
+        ids = [getattr(c, "id", None) for c in self.by_id["download-card"]._traverse()]
+        order = ["download-from", "download-to", "download-all", "download-loggers", "download-button",
+                 "download-message"]
+        self.assertEqual([i for i in ids if i in order], order)
+        # the profile graph keeps its explicit height (it is created hidden, 5276c98)
+        self.assertEqual(self.by_id["profile-graph"].style, {"height": f"{figures.PROFILE_HEIGHT}px"})
 
     def test_defaults(self):
         """resolution defaults to Daily and persists per session; the date picker has no persistence"""
@@ -247,7 +282,7 @@ class SelectorTest(PageTestCase):
 
 class DataTest(PageTestCase):
     def test_daily_one_request(self):
-        """Daily: exactly 1 /daily request for the period, no /raw; mean lines with min/max bands"""
+        """Daily: exactly 1 /daily request for the period, no /raw; one line of daily means per series, no min/max band"""
         fig, info, message, view = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05")
         daily, raw = self.measurement_requests()
         self.assertEqual([(p["start"], p["end"]) for p in daily],
@@ -255,11 +290,50 @@ class DataTest(PageTestCase):
         self.assertEqual(raw, [])
         self.assertIsNone(message)
         self.assertEqual(view["mode"], "daily")
-        filled = [t for t in fig["data"] if t.get("fill") == "tonexty"]
-        means = [t for t in fig["data"] if "customdata" in t]
-        self.assertEqual(len(filled), len(means))
-        self.assertEqual(len(means), 3 + 3 + 2 + 1 + 1)   # 3 depths, 3 weather, 2 angles, sensor temp, battery
+        self.assertFalse([t for t in fig["data"] if t.get("fill")])
+        self.assertEqual(len(fig["data"]), 3 + 3 + 2 + 1 + 1)   # 3 depths, 3 weather, 2 angles, sensor temp, battery
+        self.assertEqual([t.get("meta") for t in fig["data"]], view["keys"])
+        self.assertTrue(all("customdata" in t for t in fig["data"]))     # hover: the day's min and max
         self.assertIn("1 request(s)", text_of(info))
+        self.assertIn(texts.INFO_DAILY.format(start="2026-10-01", end="2026-10-05"), text_of(info))
+        self.assertNotIn("minimum", text_of(info))
+
+    def test_daily_gaps(self):
+        """Daily: a line breaks at a missing day (a None point), it is not drawn across the gap"""
+        result = self.client.daily(CAMPBELL_M6, "2026-10-01", "2026-10-05")
+        sel = next(iter(result.series.values()))
+        keep = [0, 1, 3, 4]
+        gap = api_client.DailySeries(details=sel.details, time=sel.time[keep], mean=sel.mean[keep],
+                                     min=sel.min[keep], max=sel.max[keep], count=sel.count[keep])
+        d = figures.daily_trace_data(gap)
+        self.assertEqual(len(d["x"]), 5)
+        self.assertIsNone(d["mean"][2])
+
+    def test_row_titles_say_what(self):
+        """row titles say what is shown: "..., daily mean" (Daily), "..., all measurements" or "..., thinned (min/max per ~...)" (Full)"""
+        fig, *_ = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05")
+        self.assertEqual(full_titles(fig), [texts.ROW_DAILY.format(title=t) for t in CAMPBELL_ROWS])
+        self.assertEqual(full_titles(fig)[0], "Ground temperature, daily mean")
+        fig, *_ = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
+        self.assertEqual(full_titles(fig), [texts.ROW_FULL.format(title=t) for t in CAMPBELL_ROWS])
+        with mock.patch.object(figures, "MAX_POINTS", 10):
+            fig, *_ = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
+        self.assertRegex(full_titles(fig)[0], r"^Ground temperature, thinned \(min/max per ~\d+ h\)$")
+
+    def test_tick_labels_every_row(self):
+        """every row shows its own date tick labels; the x axes stay linked (matched to one axis); room between the rows for the labels and the next title"""
+        for resolution in ("daily", "full"):
+            fig, *_ = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05", resolution)
+            lay = fig["layout"]
+            n = len(CAMPBELL_ROWS)
+            axes = [k for k in lay if re.fullmatch(r"xaxis\d*", k)]
+            self.assertEqual(len(axes), n)
+            self.assertTrue(all(lay[a].get("showticklabels") is True for a in axes), resolution)
+            self.assertEqual({lay["xaxis" + (str(i) if i > 1 else "")].get("matches") for i in range(1, n)}, {f"x{n}"})
+            plot_px = lay["height"] - lay["margin"]["t"] - lay["margin"]["b"]
+            for i in range(1, n):
+                upper, lower = lay["yaxis" + (str(i) if i > 1 else "")]["domain"], lay[f"yaxis{i + 1}"]["domain"]
+                self.assertGreaterEqual((upper[0] - lower[1]) * plot_px, 75)
 
     def test_rows_campbell(self):
         """figure rows of a Campbell logger: ground temperature (taller), weather, pressure in kPa, one row per angle, sensor temperature, battery; no heading"""
@@ -375,19 +449,38 @@ class ZoomTest(PageTestCase):
         self.assertEqual((ground_x[0], ground_x[-1]), ("2026-10-02T00:00:00", "2026-10-03T12:00:00"))
         self.assertIn("Zoomed", text_of(r["info"]["children"]))
         self.assertIsNone(r["message"]["children"])
+        titles = {op["location"][2]: op["params"]["value"] for op in ops if op["location"][:2] == ["layout", "annotations"]}
+        self.assertEqual(titles, {i: texts.ROW_FULL.format(title=t) for i, t in enumerate(CAMPBELL_ROWS)})
+        window = r["view"]["data"]["operations"]
+        self.assertEqual(window[0]["params"]["value"], ["2026-10-02T00:00:00+00:00", "2026-10-03T12:30:00+00:00"])
+
+    def test_zoom_thinned_titles(self):
+        """zoom in Full: the row titles follow the window (thinned over the whole range, all measurements when zoomed in)"""
+        with mock.patch.object(figures, "MAX_POINTS", 20):
+            fig, view = self.full()
+            self.assertIn("thinned", full_titles(fig)[0])
+            r = self.zoom({"xaxis.range[0]": "2026-10-02 00:00:00", "xaxis.range[1]": "2026-10-02 12:00:00"}, view)
+        ops = r["data-graph"]["figure"]["operations"]
+        titles = {op["location"][2]: op["params"]["value"] for op in ops if op["location"][:2] == ["layout", "annotations"]}
+        self.assertEqual(titles[0], texts.ROW_FULL.format(title=texts.ROW_GROUND))
 
     def test_zoom_reset(self):
         """autorange (reset) in Full: 1 /raw request for the whole loaded range"""
         _, view = self.full()
-        self.zoom({"xaxis.autorange": True, "xaxis2.autorange": True}, view)
+        r = self.zoom({"xaxis.autorange": True, "xaxis2.autorange": True}, view)
         self.assertEqual([(p["start"], p["end"]) for p in self.api_requests("measurements/raw")],
                          [("2026-10-01T00:00:00Z", "2026-10-05T23:59:59Z")])
+        self.assertIsNone(r["view"]["data"]["operations"][0]["params"]["value"])     # no window
 
     def test_zoom_daily_no_request(self):
-        """zoom in Daily, or a relayout without an x range (autosize, y only): no request, nothing changed"""
+        """zoom in Daily: no request, the figure unchanged, only the window recorded in the view; a relayout without an x range (autosize, y only): nothing"""
         *_, view = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05")
         self.server.requests.clear()
-        self.assertEqual(self.zoom({"xaxis.range[0]": "2026-10-02", "xaxis.range[1]": "2026-10-03"}, view), {})
+        r = self.zoom({"xaxis.range[0]": "2026-10-02", "xaxis.range[1]": "2026-10-03"}, view)
+        self.assertEqual(set(r), {"view"})
+        op = r["view"]["data"]["operations"][0]
+        self.assertEqual((op["location"], op["params"]["value"]),
+                         (["window"], ["2026-10-02T00:00:00+00:00", "2026-10-03T00:00:00+00:00"]))
         _, full_view = self.full()
         self.assertEqual(self.zoom({"autosize": True}, full_view), {})
         self.assertEqual(self.zoom({"yaxis2.range[0]": 1, "yaxis2.range[1]": 2}, full_view), {})
@@ -399,6 +492,7 @@ class ZoomTest(PageTestCase):
         self.server.force = fake_api.QUERY_TIMEOUT
         r = self.zoom({"xaxis.range[0]": "2026-10-02", "xaxis.range[1]": "2026-10-03"}, view)
         self.assertNotIn("data-graph", r)
+        self.assertNotIn("view", r)
         self.assertIn(texts.API_TIMEOUT, text_of(r["message"]["children"]))
         self.assertEqual(len(self.api_requests("measurements/raw")), 1)
 
@@ -412,6 +506,202 @@ class ZoomTest(PageTestCase):
         self.assertEqual(callbacks.zoom_target({"xaxis3.autorange": True}), "overview")
         self.assertIsNone(callbacks.zoom_target({"yaxis.range[0]": 0, "yaxis.range[1]": 1}))
         self.assertIsNone(callbacks.zoom_target(None))
+
+
+class PanTest(PageTestCase):
+    """Full over a period longer than a year loads its last year; a pan or zoom then loads the
+    visible window anywhere in the selected period (T16, item 8)."""
+
+    def full_long(self):
+        *_, view = self.load(CAMPBELL_M6, "2024-01-01", "2026-10-05", "full")
+        self.server.requests.clear()
+        return view
+
+    def raw_bounds(self):
+        return [(p["start"], p["end"]) for p in self.api_requests("measurements/raw")]
+
+    def view_ops(self, r):
+        return {op["location"][0]: op["params"]["value"] for op in r["view"]["data"]["operations"]}
+
+    def test_pan_before_loaded_year(self):
+        """pan to a window before the first loaded year: exactly 1 /raw with that window's bounds, the traces filled, the view's range updated"""
+        view = self.full_long()
+        self.assertEqual(view["range"], ["2025-10-06T00:00:00+00:00", "2026-10-05T23:59:59+00:00"])
+        r = self.zoom({"xaxis.range[0]": "2024-03-01 00:00:00", "xaxis.range[1]": "2024-03-20 00:00:00"}, view)
+        self.assertEqual(self.raw_bounds(), [("2024-03-01T00:00:00Z", "2024-03-20T00:00:00Z")])
+        self.assertIn("data-graph", r)
+        ops = self.view_ops(r)
+        self.assertEqual(ops["range"], ["2024-03-01T00:00:00+00:00", "2024-03-20T00:00:00+00:00"])
+        self.assertEqual(ops["window"], ops["range"])
+
+    def test_pan_fills_traces(self):
+        """a pan to the days with data (the stub has them in October 2026 only) fills the traces"""
+        *_, view = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
+        view = dict(view, range=["2026-10-04T00:00:00+00:00", "2026-10-05T23:59:59+00:00"])     # as after a zoom
+        self.server.requests.clear()
+        r = self.zoom({"xaxis.range[0]": "2026-10-01 00:00:00", "xaxis.range[1]": "2026-10-02 00:00:00"}, view)
+        self.assertEqual(self.raw_bounds(), [("2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z")])
+        x = next(op["params"]["value"] for op in r["data-graph"]["figure"]["operations"] if op["location"] == ["data", 0, "x"])
+        self.assertEqual((x[0], x[-1]), ("2026-10-01T00:00:00", "2026-10-02T00:00:00"))
+
+    def test_window_longer_than_a_year(self):
+        """a window wider than a year loads the year up to the window's end, and the info line says so"""
+        view = self.full_long()
+        r = self.zoom({"xaxis.range[0]": "2024-02-01 00:00:00", "xaxis.range[1]": "2026-06-30 12:00:00"}, view)
+        self.assertEqual(self.raw_bounds(), [("2025-07-01T00:00:00Z", "2026-06-30T12:00:00Z")])
+        self.assertIn(texts.INFO_ZOOM_LIMIT, text_of(r["info"]["children"]))
+
+    def test_window_partly_outside(self):
+        """a window partly outside the selected period is cut to it; entirely outside: no request"""
+        view = self.full_long()
+        self.zoom({"xaxis.range[0]": "2023-12-01 00:00:00", "xaxis.range[1]": "2024-01-10 00:00:00"}, view)
+        self.assertEqual(self.raw_bounds(), [("2024-01-01T00:00:00Z", "2024-01-10T00:00:00Z")])
+        self.server.requests.clear()
+        self.assertEqual(self.zoom({"xaxis.range[0]": "2026-11-01 00:00:00", "xaxis.range[1]": "2026-11-20 00:00:00"}, view), {})
+        self.assertEqual(self.raw_bounds(), [])
+
+    def test_reset_after_pan(self):
+        """autorange after a pan goes back to the first Full load (the last year of the selected period)"""
+        view = self.full_long()
+        r = self.zoom({"xaxis.range[0]": "2024-03-01 00:00:00", "xaxis.range[1]": "2024-03-20 00:00:00"}, view)
+        view = dict(view, **self.view_ops(r))
+        self.server.requests.clear()
+        r = self.zoom({"xaxis.autorange": True}, view)
+        self.assertEqual(self.raw_bounds(), [("2025-10-06T00:00:00Z", "2026-10-05T23:59:59Z")])
+        self.assertIn(texts.INFO_FULL_LIMIT, text_of(r["info"]["children"]))
+        self.assertEqual(self.view_ops(r)["range"], ["2025-10-06T00:00:00+00:00", "2026-10-05T23:59:59+00:00"])
+
+# ---- the heading: what is drawn (T16) ---------------------------------------------------------
+
+class HeadingTest(PageTestCase):
+    def setUp(self):
+        super().setUp()
+        self.catalogue = self.masts()["masts"]["data"]
+        self.server.requests.clear()
+
+    def heading(self):
+        return text_of(self.loaded["data-heading"]["children"])
+
+    def test_single_logger(self):
+        """the heading names the drawn data: mast, station, logger, Daily/Full and the period shown"""
+        self.load_all(CAMPBELL_M6, "2026-10-01", "2026-10-05", masts=self.catalogue)
+        self.assertEqual(self.heading(), "Mast 6 · SIS2024-01 · CR300_M6 (12096) · Daily means · 2026-10-01 to 2026-10-05")
+        self.load_all(CAMPBELL_M6, "2024-01-01", "2026-10-05", "full", masts=self.catalogue)
+        self.assertEqual(self.heading(), "Mast 6 · SIS2024-01 · CR300_M6 (12096) · Full resolution · 2025-10-06 to 2026-10-05")
+
+    def test_all_loggers(self):
+        """All loggers: the mast, its stations and the loggers drawn"""
+        self.load_all("all:Mast 6", "2026-09-01", "2026-10-05", masts=self.catalogue)
+        self.assertEqual(self.heading(), "Mast 6 · SIS2024-01 · All loggers: Tekbox_TBSL1_3 (feedbeefcafe0002); "
+                                         "CR300_M6 (12096) · Daily means · 2026-09-01 to 2026-10-05")
+        self.load_all("all:Mast 6", "2026-10-01", "2026-10-05", masts=self.catalogue)
+        self.assertIn("All loggers: CR300_M6 (12096) · ", self.heading())
+
+    def test_error_clears(self):
+        """a failed load: an empty figure (never the previous data), the heading names the selection and the problem; no data: the same with no data"""
+        self.load_all(CAMPBELL_M6, "2026-10-01", "2026-10-05", masts=self.catalogue)
+        self.server.force = fake_api.QUERY_TIMEOUT
+        fig, info, message, view, store = self.load_all(CAMPBELL_M13, "2026-10-01", "2026-10-05", masts=self.catalogue)
+        self.assertEqual(fig["data"], [])
+        self.assertIsNone(view)
+        self.assertIsNone(store)
+        self.assertEqual(self.loaded["profile-body"]["style"], {"display": "none"})
+        text = self.heading()
+        self.assertTrue(text.startswith("Mast 13 · SIS2024-05 · CR300_M13 (12216) · Daily means · 2026-10-01 to 2026-10-05"), text)
+        self.assertIn(texts.HEADING_FAILED.format(reason=texts.API_TIMEOUT), text)
+        self.server.force = None
+        fig, *_ = self.load_all(CAMPBELL_M6, "2025-01-01", "2025-01-10", masts=self.catalogue)
+        self.assertEqual(fig["data"], [])
+        self.assertTrue(self.heading().endswith(" · " + texts.HEADING_NO_DATA), self.heading())
+
+    def test_zoom_heading(self):
+        """a zoom in Full rewrites the heading's period to the window drawn; the profile store names its mast and logger"""
+        *_, view, store = self.load_all(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full", masts=self.catalogue)
+        self.assertEqual(store["source"], "Mast 6 · SIS2024-01 · CR300_M6 (12096)")
+        r = self.zoom({"xaxis.range[0]": "2026-10-02 00:00:00", "xaxis.range[1]": "2026-10-03 12:00:00"}, view)
+        self.assertEqual(text_of(r["data-heading"]["children"]),
+                         "Mast 6 · SIS2024-01 · CR300_M6 (12096) · Full resolution · 2026-10-02 00:00 to 2026-10-03 12:00")
+
+
+# ---- the Daily/Full switch keeps the zoom (T16) ------------------------------------------------
+
+class SwitchTest(PageTestCase):
+    def switch(self, logger, start, end, resolution, view, masts=None):
+        """load_data as the Daily/Full switch triggers it, with the view store before."""
+        self.server.requests.clear()
+        return self.load_all(logger, start, end, resolution, masts=masts, view=view,
+                             changed="resolution.value")
+
+    def test_daily_to_full_zoomed(self):
+        """Daily -> Full while zoomed: 1 /raw for the visible window only and 1 /daily for the profile (the days up to the window's end); the new figure keeps the window as its x range"""
+        *_, view = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05")
+        view = dict(view, window=["2026-10-02T06:00:00+00:00", "2026-10-03T18:00:00+00:00"])
+        fig, info, message, new_view, store = self.switch(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full", view)
+        daily, raw = self.measurement_requests()
+        self.assertEqual([(p["start"], p["end"]) for p in raw], [("2026-10-02T06:00:00Z", "2026-10-03T18:00:00Z")])
+        self.assertEqual([(p["start"], p["end"]) for p in daily], [("2026-10-01T00:00:00Z", "2026-10-03T23:59:59Z")])
+        self.assertIsNone(message)
+        self.assertEqual(fig["layout"]["xaxis"]["range"], ["2026-10-02 06:00:00", "2026-10-03 18:00:00"])
+        self.assertEqual(new_view["mode"], "full")
+        self.assertEqual(new_view["window"], ["2026-10-02T06:00:00+00:00", "2026-10-03T18:00:00+00:00"])
+        self.assertEqual(new_view["range"], ["2026-10-01T00:00:00+00:00", "2026-10-03T23:59:59+00:00"])
+        self.assertIn("Zoomed", text_of(info))
+        self.assertEqual(store["n"], 3)
+        ground = next(t for t in fig["data"] if t["name"] == "-0.10 m")
+        self.assertGreaterEqual(ground["x"][0], "2026-10-02T06:00:00")
+        self.assertLessEqual(ground["x"][-1], "2026-10-03T18:00:00")
+
+    def test_full_to_daily_zoomed(self):
+        """Full -> Daily while zoomed: 1 /daily for the whole period, as unzoomed, and the x range set to the window"""
+        *_, view = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
+        view = dict(view, window=["2026-10-02T00:00:00+00:00", "2026-10-03T00:00:00+00:00"])
+        fig, info, message, new_view, _ = self.switch(CAMPBELL_M6, "2026-10-01", "2026-10-05", "daily", view)
+        daily, raw = self.measurement_requests()
+        self.assertEqual(raw, [])
+        self.assertEqual([(p["start"], p["end"]) for p in daily], [("2026-10-01T00:00:00Z", "2026-10-05T23:59:59Z")])
+        self.assertEqual(fig["layout"]["xaxis"]["range"], ["2026-10-02 00:00:00", "2026-10-03 00:00:00"])
+        self.assertEqual(new_view["window"], view["window"])
+        self.assertEqual(new_view["range"], ["2026-10-01T00:00:00+00:00", "2026-10-05T23:59:59+00:00"])
+
+    def test_unzoomed_unchanged(self):
+        """the switch without a zoom, or another change (logger, period) with a zoom: the whole period as before, no x range set"""
+        *_, view = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05")
+        fig, *_ = self.switch(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full", view)
+        self.assertEqual([(p["start"], p["end"]) for p in self.api_requests("measurements/raw")],
+                         [("2026-10-01T00:00:00Z", "2026-10-05T23:59:59Z")])
+        zoomed = dict(view, window=["2026-10-02T00:00:00+00:00", "2026-10-03T00:00:00+00:00"])
+        self.server.requests.clear()
+        fig, info, message, new_view, _ = self.load_all(CAMPBELL_M6, "2026-10-01", "2026-10-04", "full", view=zoomed,
+                                                        changed="period.end_date")
+        self.assertEqual([(p["start"], p["end"]) for p in self.api_requests("measurements/raw")],
+                         [("2026-10-01T00:00:00Z", "2026-10-04T23:59:59Z")])
+        self.assertIsNone(new_view["window"])
+        fig, *_ = self.switch(CAMPBELL_M6, "2026-10-01", "2026-10-05", "daily", dict(zoomed, logger=TEKBOX_M6))
+        self.assertNotIn("range", fig["layout"]["xaxis"])        # a window of another logger is not kept
+
+    def test_zoom_longer_than_a_year(self):
+        """Daily -> Full with a window longer than a year: its last year only (1 /raw), and the info line says so"""
+        *_, view = self.load(CAMPBELL_M6, "2024-01-01", "2026-10-05")
+        view = dict(view, window=["2024-06-01T00:00:00+00:00", "2026-10-02T12:00:00+00:00"])
+        fig, info, message, new_view, _ = self.switch(CAMPBELL_M6, "2024-01-01", "2026-10-05", "full", view)
+        daily, raw = self.measurement_requests()
+        self.assertEqual([(p["start"], p["end"]) for p in raw], [("2025-10-03T00:00:00Z", "2026-10-02T12:00:00Z")])
+        self.assertEqual([(p["start"], p["end"]) for p in daily], [("2025-10-03T00:00:00Z", "2026-10-02T23:59:59Z")])
+        self.assertIn(texts.INFO_ZOOM_LIMIT, text_of(info))
+        self.assertEqual(fig["layout"]["xaxis"]["range"], ["2025-10-03 00:00:00", "2026-10-02 12:00:00"])
+
+    def test_all_loggers_daily_to_full_zoomed(self):
+        """All loggers, Daily -> Full zoomed into one logger's days: 1 /raw (that logger, the window) + the profile's /daily per logger with data in its days"""
+        masts = self.masts()["masts"]["data"]
+        *_, view = self.load_all("all:Mast 6", "2026-09-01", "2026-10-05", masts=masts)
+        view = dict(view, window=["2026-10-02T00:00:00+00:00", "2026-10-03T00:00:00+00:00"])
+        fig, info, message, new_view, store = self.switch("all:Mast 6", "2026-09-01", "2026-10-05", "full", view, masts)
+        daily, raw = self.measurement_requests()
+        self.assertEqual([(p["start"], p["end"]) for p in raw], [("2026-10-02T00:00:00Z", "2026-10-03T00:00:00Z")])
+        self.assertEqual(raw[0].get("serial"), "12096")
+        self.assertEqual(len(daily), 2)         # the profile, as an unzoomed Full load: both loggers in its days
+        self.assertEqual(fig["layout"]["xaxis"]["range"], ["2026-10-02 00:00:00", "2026-10-03 00:00:00"])
+        self.assertEqual(new_view["window"], view["window"])
 
 
 if __name__ == "__main__":

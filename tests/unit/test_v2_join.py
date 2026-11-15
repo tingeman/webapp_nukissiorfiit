@@ -11,6 +11,7 @@ import numpy as np
 
 from support import ApiTestCase, config
 
+from test_v2_profile import assert_envelope_as_trumpet  # noqa: E402
 from v2 import api_client, figures, join, profile, texts  # noqa: E402
 from v2.api_client import Client, DailySeries, RawSeries  # noqa: E402
 
@@ -126,7 +127,7 @@ class JoinStubTest(StubJoinCase):
         self.assertEqual(shapes[0].line.dash, "dash")
         labels = [a.text for a in fig.layout.annotations if a.name == "logger-change"]
         self.assertEqual(labels, [texts.CHANGE_LABEL.format(logger="CR300_M6 (12096)")])
-        titles = [a.text for a in fig.layout.annotations if a.name != "logger-change"]
+        titles = [a.text.removesuffix(", daily mean") for a in fig.layout.annotations if a.name != "logger-change"]
         self.assertEqual(titles, [texts.ROW_GROUND, texts.ROW_AIR, texts.ROW_HUMIDITY, texts.ROW_PRESSURE,
                                   "Inclination PitchAngle", "Inclination RollAngle", "Inclination XAngle",
                                   "Inclination YAngle", texts.ROW_HEADING, texts.ROW_SENSOR_TEMPERATURE,
@@ -157,21 +158,40 @@ class JoinStubTest(StubJoinCase):
         day = profile.day_number
 
         def drawn(d):
-            narrowed, station = profile.for_day(store, day(d))
-            return station, profile.day_profile(narrowed, day(d))
-        station, p = drawn("2024-10-16")
-        self.assertEqual((station, p["depths"]), ("SIS2024-03", [0.1, 0.25, 0.5]))
-        self.assertLess(p["mean"][0], -2.0)        # Tekbox node 1: -0.1 - 2 (offset)
-        self.assertGreater(p["mean"][0], -2.5)
-        station, p = drawn("2026-10-03")
-        self.assertEqual((station, p["depths"]), ("NUKI2026-M9", [0.1, 0.25, 0.5]))
-        self.assertLess(p["mean"][0], -3.0)        # Campbell node 1: -0.1 - 3
+            i = day(d) - store["first"]
+            station = store["station_list"][store["day_station"][i]]
+            rows = [r for r, s in enumerate(store["stations"]) if s == station]
+            return station, [store["depths"][r] for r in rows if store["mean"][r][i] is not None], \
+                [store["mean"][r][i] for r in rows if store["mean"][r][i] is not None]
+        station, depths, mean = drawn("2024-10-16")
+        self.assertEqual((station, depths), ("SIS2024-03", [0.1, 0.25, 0.5]))
+        self.assertLess(mean[0], -2.0)             # Tekbox node 1: -0.1 - 2 (offset)
+        self.assertGreater(mean[0], -2.5)
+        station, depths, mean = drawn("2026-10-03")
+        self.assertEqual((station, depths), ("NUKI2026-M9", [0.1, 0.25, 0.5]))
+        self.assertLess(mean[0], -3.0)             # Campbell node 1: -0.1 - 3
         self.assertEqual(drawn("2025-06-01")[0], "SIS2024-03")
-        annual = profile.annual_envelope(profile.for_day(store, day("2026-10-03"))[0], day("2026-10-03"))
-        self.assertEqual(annual["depths"], [0.1, 0.25, 0.5])
-        # one station: the store is used as it is
+        self.assertEqual(drawn("2026-09-30")[0], "SIS2024-03")     # the day before the switch
+        # one station: no per-day station
         single = profile.store_data(api_client.ground_temperature(join.join(self.parts("Mast 6")).series), "x")
-        self.assertEqual(profile.for_day(single, single["first"]), (single, None))
+        self.assertNotIn("day_station", single)
+
+    def test_profile_envelope_as_trumpet(self):
+        """Mast 9 profile store: the annual envelope of the day's station equals trumpet.trumpet's, at the record start, between the loggers and around the station switch"""
+        joined = join.join(self.parts("Mast 9"))
+        selected = api_client.ground_temperature(joined.series)
+        store = profile.store_data(selected, "all:Mast 9")
+        m = profile.matrices(selected)
+        day = profile.day_number
+        for d in ("2024-10-14", "2024-10-15", "2024-10-18", "2024-12-01", "2025-10-15", "2025-10-19",
+                  "2026-09-30", "2026-10-01", "2026-10-03", "2026-10-05"):
+            i = day(d) - store["first"]
+            station = store["station_list"][store["day_station"][i]]
+            rows = [r for r, s in enumerate(store["stations"]) if s == station]
+            with self.subTest(day=d, station=station):
+                assert_envelope_as_trumpet(self, store, m, i, rows)
+        i = day("2025-10-19") - store["first"]          # 366 days after the Tekbox's last day
+        self.assertEqual(store["valid"][i], 0)
 
 
 class JoinSyntheticTest(unittest.TestCase):
