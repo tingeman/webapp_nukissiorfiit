@@ -39,6 +39,8 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6
 
 ## Notes for the next session
 
+- For monitoring_db (roadmap item there, not this plan; measured 2026-11-15 on the local dev backend): `/v2/metadata?station=` takes 0.2-0.9 s vs 0.06-0.1 s for `/v1/metadata?station=`; the difference is `_timeseries_time_ranges` (`views.py`), a `MIN(time), MAX(time) ... GROUP BY timeseries_id` that reads every stored measurement of the station's timeseries in every chunk, so it grows with the data. Two index probes per timeseries (`ORDER BY time LIMIT 1` / `DESC LIMIT 1`, via `LATERAL`, on the `(timeseries, time)` unique index) should take milliseconds regardless of data volume; alternatively first/last kept on TimeSeries at ingestion. `/v1/metadata` without a filter (whole database, 256 KB, about 2 s) could get a light station list endpoint or ETag/`Last-Modified` caching.
+
 - T16 notes: profile store 2 years x 10 depths about 209 KB (was 153 KB; now sent once per load, never uploaded); integer hundredths would save about 15 %. The day marker is still a full-day band. Not checked by eye: smooth dragging and the narrow (below lg) layout. Later (roadmap): a TSP-style trumpet card per hydrological year, once loggers have a full year of data.
 
 - Keep `BACKEND_API_BASE_URL` in the `/api/v1` form: dtu_sus_web_server's nuki playbook post-check requests `<BACKEND_API_BASE_URL>/metadata` and would fail with the root form. Its `InfluxDB health` post-check goes with R3.
