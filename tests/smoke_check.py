@@ -6,7 +6,7 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
   callback   POST /app/nuki/_dash-update-component for the main callback of app.py
              (inputs: mast "Mast 6", date range 2026-10-01..2026-10-01, the day the stub
              API has data for) returns six figures built from the stub data
-             (tests/fixtures/measurements.json) and the ground temperature table
+             (tests/fixtures/measurements_v1.json) and the ground temperature table
 """
 import base64
 import json

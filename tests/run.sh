@@ -72,7 +72,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "image not found: $IMAGE
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$TESTS_DIR/.." && pwd)"
-for f in fake_api.py smoke_check.py unit/run_unit.py fixtures/metadata.json fixtures/measurements.json; do
+for f in fake_api.py smoke_check.py unit/run_unit.py fixtures/metadata.json fixtures/measurements_v1.json fixtures/measurements_v2.json; do
   [ -f "$TESTS_DIR/$f" ] || { echo "missing $TESTS_DIR/$f" >&2; exit 2; }
 done
 APP_SRC="${APP_SRC:-}"
