@@ -125,12 +125,7 @@ docker compose --project-name nuki -f compose.develop.yml -f compose.develop.loc
 
 Then `http://localhost:8050/app/nuki/v2/`. The agent checked only the default load and the profile by eye. Check: Daily/Full, a zoom in Full, the profile slider and the three envelopes, All loggers on Mast 6 and Mast 9, an Excel download of Mast 6 (All, all years; open it in Excel), the classic page `/app/nuki/` still unchanged. Note load times and anything that looks wrong; the agent fixes it on the phase 2 branch.
 
-The agent's stub view (fixture data only) may still run on port 8051; remove it with:
-
-```bash
-# WSL
-docker rm -f nukiview-app nukiview-api && docker network rm nukiview
-```
+If the page hangs (also the classic one): rebuild, the dev image needs the fix `50037ad` (gunicorn `--threads 4`); `up -d --build` above does that.
 
 ## 5. T14: release phase 2 (after steps 3 and 4)
 
