@@ -55,13 +55,13 @@ git push origin agent-api-v2 develop/main 2026.2
 
 (`2026.2` follows `2026.1`; pick another name if you prefer.)
 
-**b. Build and test (WSL, in dtu_sus_data02):**
+**b. Build and test (WSL, in dtu_sus_web_server; its `docs/deploy/releases.md`, the script is the same file as dtu_sus_data02's):**
 
 ```bash
 scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git 2026.2
 ```
 
-It clones the tag, runs `tests/run.sh` (103 tests) and writes the bundle to `release-out/webapp_nuki/`.
+It clones the tag, runs `tests/run.sh` (103 tests) and writes the bundle to dtu_sus_web_server's `release-out/webapp_nuki/`.
 
 **c. Deploy (dtu_sus_web_server, `docs/deploy/releases.md`):**
 
@@ -69,6 +69,7 @@ It clones the tag, runs `tests/run.sh` (103 tests) and writes the bundle to `rel
 2. In `ansible/vars/releases.yml`, `webapp_nuki`: `version` and `tarball_sha256` from the manifest in `release-out/webapp_nuki/`, and update the comment. Commit.
 3. From `ansible/`: `ansible-playbook -kK -i hosts playbook_install_webapp_nuki.yml -v --ask-vault-pass`.
 4. Check `https://arctic.sustain.dtu.dk/app/nuki/`: masts, loggers, a Campbell and a Tekbox logger.
+5. Fast-forward `main` to the deployed tag: `git fetch . 2026.2:main && git push origin main` (in this repository).
 
 No env change is needed: the `/api/v1` form of `BACKEND_API_BASE_URL` keeps working (one WARNING at start), and the new variables have defaults. Optional, at the next edit of the production env file: the root form `http://<data02-host>/mdb`.
 

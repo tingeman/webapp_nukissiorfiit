@@ -169,7 +169,7 @@ The default view costs less than phase 1 (one small daily request instead of 1 t
 - Check: 5 masts listed (Mast 9 with 2 loggers on 2 stations, Mast 13 without the test device); for each logger the default range has data; inclination shows Roll/Pitch (Tekbox) and X/Y (Campbell); pressure about 100 kPa; the backend log shows 1-3 `/v2/measurements/raw` requests per update and no repeats after a timeout. Note the response times for a full logger period in the status file.
 
 ### T6. Release phase 1 (you)
-- Fast-forward `develop/main` to the approved branch (with your permission), tag, then in dtu_sus_data02: `scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git <tag>`; set the version in `dtu_sus_web_server/ansible/vars/releases.yml` and deploy with its playbook.
+- Fast-forward `develop/main` to the approved branch (with your permission), tag, then in dtu_sus_web_server (WSL): `scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git <tag>`; set the version in its `ansible/vars/releases.yml` and deploy with its playbook; then fast-forward `main` to the tag.
 
 ### Phase 2 tasks (planned 2026-11-15, branch `agent-api-v2-phase2`)
 
