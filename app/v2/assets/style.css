@@ -147,3 +147,6 @@ body {
 .nuki-download-message { font-size: 0.9rem; }
 .nuki-download-message .alert { margin-bottom: 0; padding: 0.4rem 0.75rem; }
 .nuki-download-all { font-weight: 600; margin-bottom: 0.15rem; }
+
+/* the day slider's date tooltip on one line (Dash 4 slider) */
+.nuki-profile-slider .dash-slider-tooltip { white-space: nowrap; }

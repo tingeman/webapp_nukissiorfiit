@@ -100,7 +100,10 @@ def profile_section():
                 _field(texts.PROFILE_ENVELOPE, html.Div(envelope, title=texts.ENVELOPE_HELP), xs=12, lg=4),
             ], className="g-3 mb-2"),
             html.Div(id="profile-label", className="nuki-info"),
+            # explicit height: the graph is created inside the hidden profile-body, and
+            # without it its div keeps height 0 when shown (the plot then overlaps the next card)
             dcc.Loading(dcc.Graph(id="profile-graph", config=CONFIG,
+                                  style={"height": f"{figures.PROFILE_HEIGHT}px"},
                                   figure=figures.empty_figure("", figures.PROFILE_HEIGHT)),
                         type="circle", delay_show=300),
         ], id="profile-body", style={"display": "none"}),
