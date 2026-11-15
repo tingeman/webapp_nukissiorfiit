@@ -4,20 +4,21 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Branch: `agent-api-v2`.
 
 ## Now
 
-Plan approved 2026-11-15. Phase 1 code done (T1-T4). Next: **T5 (you)**, the check against the local backend, then T6 (release). Phase 2: T7 (skeleton at `/app/nuki/v2/`) on branch `agent-api-v2-phase2` (from `agent-api-v2`), so the phase 1 release stays free of phase 2 code. The phase 2 planning session (design questions) waits for you.
+Plan approved 2026-11-15. Phase 1 code done (T1-T4). Next: **T5 (you)**, the check against the local backend, then T6 (release). Phase 2: T7 done on branch `agent-api-v2-phase2` (from `agent-api-v2`; the phase 1 release stays free of phase 2 code; merge `agent-api-v2` into it when phase 1 changes). Next for phase 2: the planning session with you (design questions below), then T8 onward.
 
 ## Done
 
 - T1 2026-11-15: stub API v2 (v1/v2 metadata, `/v2/measurements/raw`, gzip), fixture generator `tests/fixtures/make_fixtures.py` (Tekbox + Campbell per mast, Mast 9 on two stations, M13 Tekbox without data, QAA2017-01 and SIS2024-07 to be filtered), 19 stub tests; suite 53 passed (`560adfd`)
 - T2 2026-11-15: db_connector v2 next to the v1 functions: root URL, R1, metadata caches, `mast_catalogue`, chunked `/raw` (chunks counted from the start date, not 1 August), selections, pressure in kPa; suite 105 passed (`7f9b7d0`)
 - T3 2026-11-15: page on v2: mast and logger dropdowns from the metadata, range follows the logger (date picker persistence removed: the logger callback sets the range at every load), one `/raw` request set per update, inclination by datatype, pressure in kPa, battery legend "Battery level" (was "B"); v1 data access, stub route and fixture removed; `influx_test`/`influxdb_client` imports dropped from app.py (unused); suite 103 passed (`48ed122`)
+- T7 2026-11-15 (branch `agent-api-v2-phase2`): skeleton page at `/app/nuki/v2/`, a second Dash app on the same Flask server (`app/v2/`), links both ways, the classic data callback moved from the global `@callback` to `@app.callback` (Dash puts global callbacks into whichever app sets up first); suite 109 passed (`fd42b1d`)
 - T4 2026-11-15: env template, README and cross-repo TODOs (`00a2f98`)
 
 ## Open questions
 
 - T2 request pattern (for you to confirm): building the mast list fetches `/api/v2/metadata?station=` for every included station (6 small sequential requests per worker per 10 min, plus 1 `/v1/metadata`), not only for the selected mast. Alternative: fetch per mast lazily, and the mast list then cannot hide masts without data.
 
-- Phase 2: default mode of the Daily/Full switch, and the threshold (to decide in the phase 2 planning session).
+- Phase 2 planning (with you): own data client in `app/v2/` (TSP-style) or extend `db_connector`; Daily/Full default and limit; one figure with shared x axis or synced figures; "All loggers" as default view; profile plot with or without the annual envelope (trumpet); table kept, CSV download or dropped; page styling (the classic page loads no Bootstrap CSS; vendored CSS in `app/v2/assets/` as in TSP).
 - monitoring_db: a site/group field for masts, and the inclinometer mounting orientation (plan, "Notes on the sensor definitions").
 
 ## Notes for the next session
