@@ -40,7 +40,7 @@ cd .. && git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phas
 
 Independent of the phase 2 work (other branch; the release builds from GitHub, not from this checkout).
 
-1. Push and fast-forward: `git push origin agent-api-v2`, then fast-forward `develop/main` to `agent-api-v2` (or tell the agent "fast-forward develop/main to agent-api-v2"; it then does only that merge, the push stays yours).
+1. Push and fast-forward: `git push origin agent-api-v2` (now includes `655aa0a`, "Backend not reachable"; your running dev app in `webapp_nuki_phase1` has reloaded with it, so you can check it by stopping `mdb-nginx-service` again), then fast-forward `develop/main` to `agent-api-v2` (or tell the agent "fast-forward develop/main to agent-api-v2"; it then does only that merge, the push stays yours).
 2. Tag on `develop/main` and push the tag.
 3. In dtu_sus_data02: `scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git <tag>`.
 4. In dtu_sus_web_server: set the version in `ansible/vars/releases.yml`, deploy with its playbook.
