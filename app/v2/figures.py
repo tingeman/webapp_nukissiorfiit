@@ -6,6 +6,8 @@ is made here.
     data_figure(rows, mode, revision)  -> one make_subplots figure, shared x axes
     raw_trace_data(selected, lo, hi)   -> x, y and mode of one Full trace (thinned to the window)
     empty_figure(message)              -> a placeholder with a message
+    profile_figure(day, annual, ...)   -> the ground temperature profile of one day (T10)
+    day_marker(day)                    -> a shape marking that day on the data figure
 
 Rows, top to bottom, each left out without data: ground temperature (one line per depth,
 taller), air temperature, relative humidity, barometric pressure (kPa), one row per
@@ -250,3 +252,75 @@ def _plotly_time(t) -> str:
     if getattr(t, "tzinfo", None) is not None:
         t = t.astimezone(dt.timezone.utc).replace(tzinfo=None)
     return t.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ---- ground temperature profile (T10) ---------------------------------------------------------
+
+PROFILE_HEIGHT = 460
+PROFILE_MARGIN = dict(l=70, r=20, t=60, b=20)
+MEAN_COLOR = "#1d4f91"          # the page's accent colour
+ANNUAL_MAX_COLOR = "#d62728"
+ANNUAL_MIN_COLOR = "#1f77b4"
+DAY_BAND_ALPHA = 0.22
+DAY_MARKER_COLOR = "rgba(29, 79, 145, 0.55)"
+ENVELOPES = ("day", "annual", "both")
+
+
+def profile_figure(day: dict, annual: dict | None, envelope: str, x_range, depth_max: float,
+                   revision: str) -> go.Figure:
+    """Temperature (x) against depth (y, negative down, m) of one day (profile.day_profile):
+    the daily mean, with the day's min/max band (``envelope`` "day" or "both") and/or the
+    annual envelope's max and min curves (profile.annual_envelope; "annual" or "both").
+    Every trace has ``meta``: "day-band", "annual-max", "annual-min", "mean". The axes are
+    fixed by ``x_range`` (°C) and ``depth_max`` (m), so they do not move while sliding;
+    ``revision`` is the uirevision (the user's zoom stays while sliding)."""
+    envelope = envelope if envelope in ENVELOPES else "day"
+    fig = go.Figure()
+    if envelope in ("annual", "both") and annual and annual["depths"]:
+        y = [-d for d in annual["depths"]]
+        for key, name, color in (("max", texts.PROFILE_ANNUAL_MAX, ANNUAL_MAX_COLOR),
+                                 ("min", texts.PROFILE_ANNUAL_MIN, ANNUAL_MIN_COLOR)):
+            fig.add_trace(go.Scatter(
+                x=annual[key], y=y, name=name, meta=f"annual-{key}", mode="lines+markers",
+                customdata=[f"{v:+0.2f} m" for v in y], line=dict(color=color, width=1.6, dash="dash"),
+                marker=dict(color=color, size=5), hovertemplate=texts.HOVER_PROFILE.format(name=name)))
+    if day["depths"]:
+        y = [-d for d in day["depths"]]
+        if envelope in ("day", "both"):
+            fig.add_trace(go.Scatter(
+                x=day["max"] + day["min"][::-1], y=y + y[::-1], name=texts.PROFILE_DAY_BAND,
+                meta="day-band", mode="lines", fill="toself", line=dict(width=0, color=MEAN_COLOR),
+                fillcolor=_rgba(MEAN_COLOR, DAY_BAND_ALPHA), hoverinfo="skip"))
+        fig.add_trace(go.Scatter(
+            x=day["mean"], y=y, name=texts.PROFILE_MEAN, meta="mean", mode="lines+markers",
+            customdata=list(zip(day["labels"], day["min"], day["max"])),
+            line=dict(color=MEAN_COLOR, width=2), marker=dict(color=MEAN_COLOR, size=6),
+            hovertemplate=texts.HOVER_PROFILE_MEAN.format(name=texts.PROFILE_MEAN)))
+    annotations = []
+    if not day["depths"]:
+        annotations.append(dict(text=texts.PROFILE_NO_DAY.format(day=day["day"]), x=0.5, y=0.5,
+                                xref="paper", yref="paper", showarrow=False, font=dict(size=15, color=MUTED)))
+    lo, hi = x_range or [-10, 10]
+    pad = 0.04 * (hi - lo)
+    axis = dict(showgrid=True, gridcolor=GRID, showline=True, linecolor=AXIS, mirror=True,
+                ticks="outside", tickcolor=AXIS, zeroline=False)
+    fig.update_layout(
+        **_base_layout(PROFILE_HEIGHT), margin=PROFILE_MARGIN, hovermode="closest",
+        xaxis=dict(axis, title=dict(text=texts.PROFILE_XAXIS), side="top", range=[lo - pad, hi + pad]),
+        yaxis=dict(axis, title=dict(text=texts.PROFILE_YAXIS), range=[-1.08 * (depth_max or 1.0), 0]),
+        legend=dict(x=0.01, y=0.01, xanchor="left", yanchor="bottom", bgcolor="rgba(255,255,255,0.85)",
+                    bordercolor=GRID, borderwidth=1, font=dict(size=12)),
+        shapes=[dict(type="line", xref="x", yref="paper", x0=0, x1=0, y0=0, y1=1,
+                     line=dict(color=AXIS, width=1.2, dash="dot"), layer="below")],
+        annotations=annotations, uirevision=revision)
+    return fig
+
+
+def day_marker(day: str) -> dict:
+    """A shape marking one UTC day (``"YYYY-MM-DD"``) on every row of the data figure (the
+    x axes are matched, the shape spans the paper height)."""
+    start = dt.date.fromisoformat(day)
+    end = start + dt.timedelta(days=1)
+    return dict(type="rect", xref="x", yref="paper", x0=f"{start.isoformat()} 00:00:00",
+                x1=f"{end.isoformat()} 00:00:00", y0=0, y1=1, fillcolor=DAY_MARKER_COLOR,
+                opacity=0.35, line=dict(color=DAY_MARKER_COLOR, width=1), layer="below")

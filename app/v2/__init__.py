@@ -11,7 +11,8 @@ The package is imported as ``v2`` (app/ is the module root: WORKDIR /app in the 
 sys.path in the unit tests). Its modules import each other relatively, so their names
 (layout, callbacks, texts) cannot collide with top-level modules of app/.
 
-Static files: app/v2/assets/ (Bootstrap 5.3.8 CSS, vendored, and style.css), served by this
+Static files: app/v2/assets/ (Bootstrap 5.3.8 CSS, vendored, style.css, and profile.js,
+the date tooltip of the profile's day slider), served by this
 Dash app only, under /app/nuki/v2/assets/ (the classic app's assets folder is app/assets/,
 which does not exist, so the classic page is unaffected). plotly.js and the Dash renderer
 come from the installed packages (serve_locally): the page loads nothing from a third-party

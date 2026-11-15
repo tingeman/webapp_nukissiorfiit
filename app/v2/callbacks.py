@@ -23,6 +23,13 @@ Data flow (requests per action in the plan, "Phase 2 design"):
    set, exactly the window's datetimes), thinned and patched into the traces by key (the
    figure's zoom stays as the user left it); autorange (reset) loads the stored range again.
    Daily makes no request on a zoom. Nothing is kept on the server between requests.
+6. The ground temperature profile (T10): ``load`` also fills the ``profile`` store
+   (profile.py: the daily ground temperatures, compact arrays). Daily reuses the load's
+   /daily result; Full makes one extra /daily request set for the same (one-year) range,
+   after the raw one. A zoom makes none. The store sets the day slider (limits, marks,
+   default the last day) or hides the profile with a note; the slider, the envelope choice
+   or a new store draw the profile from the store alone (no API request) and mark the day
+   on the data figure (a Patch of its shapes).
 
 Problems end up as an alert on the page (``str(ApiError)``, texts.py) and one log line,
 never as a traceback on the page.
@@ -38,7 +45,7 @@ import uuid
 import dash_bootstrap_components as dbc
 from dash import Input, Output, Patch, State, html, no_update
 
-from . import api_client, figures, texts
+from . import api_client, figures, profile, texts
 
 logger = logging.getLogger("nuki.v2")
 
@@ -171,20 +178,28 @@ def _fmt_time(t: dt.datetime) -> str:
     return t.strftime("%Y-%m-%d %H:%M")
 
 
-def info_items(what: str, result, note: str | None = None):
+def info_items(what: str, result, note: str | None = None, profile_result=None):
     """The info line: what the figure shows, the API part (requests, wall seconds, size) and
-    the requests one by one (folded)."""
-    api = texts.INFO_REQUESTS.format(requests=len(result.requests), seconds=result.wall_seconds,
-                                     size=size_text(result.bytes))
+    the requests one by one (folded). ``profile_result``: the extra /daily of a Full load
+    (made after the raw one: the seconds add up); its requests are listed after the raw
+    ones, each line with its kind."""
+    parts = [(texts.INFO_KIND_RAW, result)]
+    if profile_result is not None:
+        parts.append((texts.INFO_KIND_PROFILE, profile_result))
+    requests = [(kind, r) for kind, res in parts for r in res.requests]
+    api = texts.INFO_REQUESTS.format(requests=len(requests),
+                                     seconds=sum(res.wall_seconds for _, res in parts),
+                                     size=size_text(sum(res.bytes for _, res in parts)))
     lines = [html.Span(what, className="nuki-info-what"), html.Span(" · " + api, className="nuki-info-api")]
     out = [html.Div(lines)]
     if note:
         out.append(html.Div(note, className="nuki-info-note"))
     out.append(html.Details([
         html.Summary(texts.INFO_DETAILS),
-        html.Ul([html.Li(texts.INFO_REQUEST_LINE.format(start=r.start, end=r.end, seconds=r.seconds,
-                                                        size=size_text(r.bytes)))
-                 for r in result.requests], className="nuki-requests"),
+        html.Ul([html.Li((texts.INFO_REQUEST_KIND.format(kind=kind) if profile_result is not None else "")
+                         + texts.INFO_REQUEST_LINE.format(start=r.start, end=r.end, seconds=r.seconds,
+                                                          size=size_text(r.bytes)))
+                 for kind, r in requests], className="nuki-requests"),
     ], className="nuki-details"))
     return out
 
@@ -203,9 +218,11 @@ def _full_what(lo, hi, bin_seconds, zoomed=False):
 
 def load(client: api_client.Client, logger_value, start, end, resolution):
     """Everything a logger/period/resolution change produces, as plain values: figure,
-    info (children), message (alert or None), view (store or None). Raises ApiError."""
+    info (children), message (alert or None), view (store or None), profile (store or
+    None, profile.py). Raises ApiError (not for the profile request of a Full load: its
+    error goes into the profile store, and the Full figure is shown)."""
     out = {"figure": figures.empty_figure(texts.FIGURE_EMPTY), "info": None, "message": None,
-           "view": None}
+           "view": None, "profile": None}
     if not logger_value:
         return out
     start, end = _date(start), _date(end)
@@ -231,6 +248,13 @@ def load(client: api_client.Client, logger_value, start, end, resolution):
         note = texts.INFO_FULL_LIMIT if limited else None
         what = _full_what(lo, hi, bin_s)
         mode = "full"
+        profile_result = None
+        try:        # the profile: one /daily request set for the same days
+            profile_result = client.daily(logger_value, start, end)
+            out["profile"] = profile.store_data(api_client.ground_temperature(profile_result.series),
+                                                logger_value)
+        except api_client.ApiError as e:        # the client logged it
+            out["profile"] = profile.empty(logger_value, str(e))
     else:
         lo, hi = day_bounds(start, end)
         result = client.daily(logger_value, start, end)
@@ -239,15 +263,17 @@ def load(client: api_client.Client, logger_value, start, end, resolution):
         note = None
         what = texts.INFO_DAILY.format(start=start.isoformat(), end=end.isoformat())
         mode = "daily"
+        profile_result = None       # the profile reuses this /daily result
+        out["profile"] = profile.store_data(api_client.ground_temperature(result.series), logger_value)
     logger.info("v2 load %s %s %s..%s: %d request(s), API %.2f s, %d bytes, %d rows, %d traces, %.2f s",
                 logger_value, mode, lo.isoformat(), hi.isoformat(), len(result.requests),
                 result.wall_seconds, result.bytes, len(rows), len(keys), time.perf_counter() - t0)
     if not rows:
         out["message"] = _alert(texts.NO_DATA.format(start=start.isoformat(), end=end.isoformat()), "info")
-        out["info"] = info_items(what, result, note)
+        out["info"] = info_items(what, result, note, profile_result)
         return out
     out["figure"] = fig
-    out["info"] = info_items(what, result, note)
+    out["info"] = info_items(what, result, note, profile_result)
     out["view"] = {"logger": logger_value, "mode": mode, "range": [lo.isoformat(), hi.isoformat()],
                    "keys": keys, "note": note}
     return out
@@ -291,6 +317,47 @@ def zoom(client: api_client.Client, relayout, view):
                 window[0].isoformat(), window[1].isoformat(), len(result.requests),
                 result.wall_seconds, result.bytes)
     return patch, info_items(what, result, view.get("note"))
+
+
+def profile_setup(store):
+    """(slider min, max, marks, value, body style, note) for a new ``profile`` store: the
+    loaded days, default the last one; without ground temperatures the body is hidden and
+    the note says why."""
+    hidden = {"display": "none"}
+    if not store:
+        return 0, 1, {}, None, hidden, texts.PROFILE_EMPTY
+    if store.get("error"):
+        return 0, 1, {}, None, hidden, _alert(texts.PROFILE_ERROR.format(reason=store["error"]), "warning")
+    if not profile.has_profile(store):
+        return 0, 1, {}, None, hidden, texts.PROFILE_NO_GROUND
+    first, last = store["first"], profile.last_day(store)
+    return first, last, profile.slider_marks(first, last), last, {}, None
+
+
+def profile_label(day: dict, annual, store) -> str:
+    text = texts.PROFILE_LABEL.format(day=day["day"])
+    if annual is not None:
+        text += "; " + texts.PROFILE_LABEL_ANNUAL.format(start=annual["start"], end=annual["end"],
+                                                          valid=annual["valid_days"], days=annual["days"])
+        if annual["days"] < profile.WINDOW_DAYS:
+            text += texts.PROFILE_LABEL_SHORT.format(start=profile.day_text(store["first"]))
+    return text
+
+
+def profile_draw(day_value, envelope, store):
+    """(profile figure, label, day marker patch of the data figure) of a day and envelope,
+    from the store alone (no API request); None without a profile."""
+    if not profile.has_profile(store):
+        return None
+    day = profile.clamp_day(store, day_value)
+    envelope = envelope if envelope in figures.ENVELOPES else "day"
+    p = profile.day_profile(store, day)
+    annual = profile.annual_envelope(store, day) if envelope in ("annual", "both") else None
+    fig = figures.profile_figure(p, annual, envelope, store.get("x_range"), max(store["depths"]),
+                                 revision=str(store.get("logger")))
+    marker = Patch()
+    marker["layout"]["shapes"] = [figures.day_marker(p["day"])]
+    return fig, profile_label(p, annual, store), marker
 
 
 # ---- registration -----------------------------------------------------------------------------
@@ -350,6 +417,7 @@ def register(app, client: api_client.Client):
         Output("info", "children"),
         Output("message", "children"),
         Output("view", "data"),
+        Output("profile", "data"),
         Input("logger", "value"),
         Input("period", "start_date"),
         Input("period", "end_date"),
@@ -359,11 +427,11 @@ def register(app, client: api_client.Client):
         try:
             r = load(client, logger_value, start, end, resolution)
         except api_client.ApiError as e:        # the client logged it
-            return figures.empty_figure(""), None, _alert(str(e), "danger"), None
+            return figures.empty_figure(""), None, _alert(str(e), "danger"), None, None
         except Exception:   # a bug or an unexpected payload: message, log, page stays usable
             logger.exception("v2 load %s %s..%s (%s) failed", logger_value, start, end, resolution)
-            return figures.empty_figure(""), None, _alert(texts.UNEXPECTED, "danger"), None
-        return r["figure"], r["info"], r["message"], r["view"]
+            return figures.empty_figure(""), None, _alert(texts.UNEXPECTED, "danger"), None, None
+        return r["figure"], r["info"], r["message"], r["view"], r["profile"]
 
     @app.callback(
         Output("data-graph", "figure", allow_duplicate=True),
@@ -384,5 +452,40 @@ def register(app, client: api_client.Client):
         if r is None:
             return no_update, no_update, no_update
         return r[0], r[1], None
+
+    @app.callback(
+        Output("profile-day", "min"),
+        Output("profile-day", "max"),
+        Output("profile-day", "marks"),
+        Output("profile-day", "value"),
+        Output("profile-body", "style"),
+        Output("profile-note", "children"),
+        Input("profile", "data"),
+    )
+    def setup_profile(store):
+        try:
+            return profile_setup(store)
+        except Exception:
+            logger.exception("v2 profile setup failed")
+            return 0, 1, {}, None, {"display": "none"}, _alert(texts.UNEXPECTED, "danger")
+
+    @app.callback(
+        Output("profile-graph", "figure"),
+        Output("profile-label", "children"),
+        Output("data-graph", "figure", allow_duplicate=True),
+        Input("profile-day", "value"),
+        Input("profile-envelope", "value"),
+        Input("profile", "data"),
+        prevent_initial_call=True,
+    )
+    def draw_profile(day_value, envelope, store):
+        try:
+            r = profile_draw(day_value, envelope, store)
+        except Exception:
+            logger.exception("v2 profile draw failed (day %s, %s)", day_value, envelope)
+            return figures.empty_figure(texts.UNEXPECTED, figures.PROFILE_HEIGHT), None, no_update
+        if r is None:
+            return figures.empty_figure("", figures.PROFILE_HEIGHT), None, no_update
+        return r
 
     return app

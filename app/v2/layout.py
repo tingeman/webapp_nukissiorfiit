@@ -16,9 +16,17 @@ Component ids (used by callbacks.py and the tests):
     info             what the figure shows, and the requests it took
     data-graph       the figure (one make_subplots figure, shared x axes)
     view             dcc.Store: what the figure shows (callbacks.py), for the zoom
+    profile          dcc.Store: the daily ground temperatures of the load (profile.py), so
+                     the profile is drawn for any day and envelope without an API request
+    profile-note     why there is no profile (no data loaded, no ground temperatures, ...)
+    profile-body     slider, envelope choice, label and profile figure; hidden without data
+    profile-day      day slider; value = days since 1970-01-01 (its tooltip shows the date,
+                     assets/profile.js); limits = the loaded days, default the last one
+    profile-envelope "day" (default) / "annual" / "both"; persisted per browser session
+    profile-label    the chosen day and the annual envelope's window
+    profile-graph    temperature against depth of the chosen day
 
-Room for the next tasks: the profile (T10) goes in its own card below the figure
-(``profile_section``), "All loggers" (T11) is an option of the logger dropdown, and the
+Room for the next tasks: "All loggers" (T11) is an option of the logger dropdown, and the
 download (T12) a card of its own after the profile.
 """
 import dash_bootstrap_components as dbc
@@ -62,6 +70,34 @@ def figure_section():
     ]), className="nuki-card mb-3")
 
 
+def profile_section():
+    envelope = dbc.RadioItems(
+        id="profile-envelope", value="day", persistence=True, persistence_type="session",
+        options=[{"label": texts.ENV_DAY, "value": "day"},
+                 {"label": texts.ENV_ANNUAL, "value": "annual"},
+                 {"label": texts.ENV_BOTH, "value": "both"}],
+        className="btn-group", inputClassName="btn-check",
+        labelClassName="btn btn-outline-primary btn-sm", labelCheckedClassName="active")
+    slider = dcc.Slider(
+        id="profile-day", min=0, max=1, step=1, value=None, marks={}, included=False,
+        allow_direct_input=False, updatemode="mouseup",
+        tooltip={"placement": "bottom", "always_visible": True, "transform": "nukiDay"})
+    return dbc.Card(dbc.CardBody([
+        html.Div(texts.PROFILE_TITLE, className="nuki-card-title"),
+        html.Div(texts.PROFILE_EMPTY, id="profile-note", className="nuki-profile-note"),
+        html.Div([
+            dbc.Row([
+                _field(texts.PROFILE_DAY, html.Div(slider, className="nuki-profile-slider"), xs=12, lg=8),
+                _field(texts.PROFILE_ENVELOPE, html.Div(envelope, title=texts.ENVELOPE_HELP), xs=12, lg=4),
+            ], className="g-3 mb-2"),
+            html.Div(id="profile-label", className="nuki-info"),
+            dcc.Loading(dcc.Graph(id="profile-graph", config=CONFIG,
+                                  figure=figures.empty_figure("", figures.PROFILE_HEIGHT)),
+                        type="circle", delay_show=300),
+        ], id="profile-body", style={"display": "none"}),
+    ]), className="nuki-card mb-3")
+
+
 def build(classic_url):
     """The page. ``classic_url`` is the absolute path of the classic page; a plain link (full
     page load), since the classic page is another Dash app."""
@@ -69,6 +105,7 @@ def build(classic_url):
         dcc.Location(id="url", refresh=False),
         dcc.Store(id="masts"),
         dcc.Store(id="view"),
+        dcc.Store(id="profile"),
         html.Header(dbc.Container([
             dbc.Row([
                 dbc.Col(html.H1(texts.TITLE, className="nuki-title"), xs=12, lg=True),
@@ -84,7 +121,8 @@ def build(classic_url):
             controls(),
             html.Div(id="message"),
             figure_section(),
-            # T10: profile_section() here; T12: the download card after it
+            profile_section(),
+            # T12: the download card here
             html.Footer(texts.FOOTER, className="nuki-footer"),
         ], fluid="xl", className="nuki-main"),
     ])

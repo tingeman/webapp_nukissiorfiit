@@ -98,14 +98,18 @@ class PageTestCase(ApiTestCase):
         return self.call([("masts", "data"), ("mast", "options"), ("mast", "value"),
                           ("masts-message", "children")], [("url", "pathname", v2.URL_PREFIX)])
 
-    def load(self, logger, start, end, resolution="daily"):
-        """load_data: (figure, info children, message children, view)."""
+    def load_all(self, logger, start, end, resolution="daily"):
+        """load_data: (figure, info children, message children, view, profile store)."""
         r = self.call([("data-graph", "figure"), ("info", "children"), ("message", "children"),
-                       ("view", "data")],
+                       ("view", "data"), ("profile", "data")],
                       [("logger", "value", logger), ("period", "start_date", start),
                        ("period", "end_date", end), ("resolution", "value", resolution)])
         return (r["data-graph"]["figure"], r["info"]["children"], r["message"]["children"],
-                r["view"]["data"])
+                r["view"]["data"], r["profile"]["data"])
+
+    def load(self, logger, start, end, resolution="daily"):
+        """load_data: (figure, info children, message children, view)."""
+        return self.load_all(logger, start, end, resolution)[:4]
 
     def zoom(self, relayout, view):
         return self.call([("data-graph", "figure"), ("info", "children"), ("message", "children")],
@@ -124,7 +128,8 @@ class LayoutTest(unittest.TestCase):
     def test_ids(self):
         """the v2 layout has the selectors, the store, the info line, the message and the figure"""
         for cid in ("classic-link", "url", "masts", "masts-message", "mast", "logger", "period",
-                    "resolution", "message", "info", "data-graph", "view"):
+                    "resolution", "message", "info", "data-graph", "view", "profile", "profile-note",
+                    "profile-body", "profile-day", "profile-envelope", "profile-label", "profile-graph"):
             self.assertIn(cid, self.by_id)
 
     def test_defaults(self):
@@ -293,12 +298,14 @@ class DataTest(PageTestCase):
         self.assertIsNone(view)
 
     def test_full_one_request(self):
-        """Full: exactly 1 /raw request for the period, no /daily; one line per series with its column key"""
+        """Full: exactly 1 /raw request for the period and 1 /daily for the profile (same days); one line per series with its column key"""
         fig, info, message, view = self.load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
         daily, raw = self.measurement_requests()
-        self.assertEqual(daily, [])
         self.assertEqual([(p["start"], p["end"]) for p in raw],
                          [("2026-10-01T00:00:00Z", "2026-10-05T23:59:59Z")])
+        self.assertEqual([(p["start"], p["end"]) for p in daily],
+                         [("2026-10-01T00:00:00Z", "2026-10-05T23:59:59Z")])
+        self.assertIn("2 request(s)", text_of(info))
         self.assertIsNone(message)
         self.assertEqual(row_titles(fig), CAMPBELL_ROWS)
         self.assertEqual(view["mode"], "full")
@@ -309,11 +316,12 @@ class DataTest(PageTestCase):
         self.assertIn(texts.INFO_FULL.format(start="2026-10-01", end="2026-10-05"), text_of(info))
 
     def test_full_limit(self):
-        """Full over more than a year loads, in one raw request, the year up to the end date, and the info line says so"""
+        """Full over more than a year loads, in one raw request, the year up to the end date (the profile's daily the same year), and the info line says so"""
         fig, info, message, view = self.load(CAMPBELL_M6, "2024-01-01", "2026-10-05", "full")
         daily, raw = self.measurement_requests()
-        self.assertEqual(daily, [])
         self.assertEqual([(p["start"], p["end"]) for p in raw],
+                         [("2025-10-06T00:00:00Z", "2026-10-05T23:59:59Z")])
+        self.assertEqual([(p["start"], p["end"]) for p in daily],
                          [("2025-10-06T00:00:00Z", "2026-10-05T23:59:59Z")])
         self.assertEqual(view["range"], ["2025-10-06T00:00:00+00:00", "2026-10-05T23:59:59+00:00"])
         self.assertIn(texts.INFO_FULL_LIMIT, text_of(info))

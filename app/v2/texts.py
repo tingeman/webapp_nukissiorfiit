@@ -52,6 +52,10 @@ INFO_FULL_LIMIT = ("Full resolution is limited to one year: showing the last yea
 INFO_REQUESTS = "{requests} request(s), {seconds:.2f} s, {size}"
 INFO_DETAILS = "Requests"
 INFO_REQUEST_LINE = "{start} to {end}: {seconds:.2f} s, {size}"
+# Full: the kind of each request ({kind} is INFO_KIND_RAW or INFO_KIND_PROFILE) before the line
+INFO_REQUEST_KIND = "{kind}: "
+INFO_KIND_RAW = "raw"
+INFO_KIND_PROFILE = "daily, for the profile"
 
 # ---- figure ---------------------------------------------------------------------------------
 FIGURE_EMPTY = "Choose a mast and a logger to see its data."
@@ -67,6 +71,37 @@ ROW_BATTERY = "Battery voltage"
 HOVER_DAILY = ("%{{x|%Y-%m-%d}}<br>mean %{{y:.3f}} {unit}<br>"
                "min %{{customdata[0]:.3f}} · max %{{customdata[1]:.3f}}<extra>{name}</extra>")
 HOVER_RAW = "%{{x|%Y-%m-%d %H:%M:%S}} UTC<br>%{{y:.3f}} {unit}<extra>{name}</extra>"
+
+# ---- ground temperature profile (T10) ------------------------------------------------------
+PROFILE_TITLE = "Ground temperature profile"
+PROFILE_DAY = "Day"
+PROFILE_ENVELOPE = "Envelope"
+ENV_DAY = "Day min/max"
+ENV_ANNUAL = "Annual envelope"
+ENV_BOTH = "Both"
+ENVELOPE_HELP = ("Day min/max: the lowest and highest value of the chosen day at each depth. "
+                 "Annual envelope: the lowest and highest daily mean of the 365 days up to "
+                 "the chosen day.")
+PROFILE_EMPTY = "The profile appears here when a logger's data is loaded."
+PROFILE_NO_GROUND = "This logger has no ground temperature data in the chosen period, so there is no profile."
+PROFILE_ERROR = "The data for the profile could not be loaded. {reason}"
+PROFILE_NO_DAY = "No ground temperature data on {day}."
+# the line above the profile: {day}; the annual part only with an annual envelope
+PROFILE_LABEL = "Daily mean of {day}"
+PROFILE_LABEL_ANNUAL = ("annual envelope from the daily means of {start} to {end} "
+                        "({valid} of {days} days with data)")
+PROFILE_LABEL_SHORT = " (the loaded data starts on {start})"
+PROFILE_MEAN = "Daily mean"
+PROFILE_DAY_BAND = "Day min/max"
+PROFILE_ANNUAL_MAX = "Annual max"
+PROFILE_ANNUAL_MIN = "Annual min"
+PROFILE_XAXIS = "Temperature (°C)"
+PROFILE_YAXIS = "Depth (m)"
+# {name} the trace name; customdata is the depth label
+HOVER_PROFILE = "%{{customdata}}: %{{x:.2f}} °C<extra>{name}</extra>"
+# the daily mean, with the day's min and max (customdata: label, min, max)
+HOVER_PROFILE_MEAN = ("%{{customdata[0]}}: %{{x:.2f}} °C<br>"
+                      "day min %{{customdata[1]:.2f}} · max %{{customdata[2]:.2f}}<extra>{name}</extra>")
 
 # ---- API problems (api_client.ApiError: str(error) is one of these) -----------------------
 # {detail} is the API's own message

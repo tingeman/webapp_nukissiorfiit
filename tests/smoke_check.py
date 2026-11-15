@@ -19,8 +19,11 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
              (Mast 6: default the Campbell, the logger with the latest data), set_period (its
              first..last day), load_data Daily (one figure: ground temperature, weather,
              pressure in kPa, the two angles, sensor temperature, battery; mean lines with
-             min/max bands) and Full (the same rows, one line per series), and zoom_data on
-             a window of the Full figure (its traces patched)
+             min/max bands) and Full (the same rows, one line per series), each with the
+             profile store (the 3 ground temperature depths), zoom_data on a window of the
+             Full figure (its traces patched), and setup_profile/draw_profile (the slider on
+             the last day, the profile of that day with the annual envelope, the day marked
+             on the data figure)
 """
 import base64
 import json
@@ -247,7 +250,8 @@ def v2_duplicate_outputs(outputs):
 
 
 def v2_load(logger, start, end, resolution):
-    r = v2_call([("data-graph", "figure"), ("info", "children"), ("message", "children"), ("view", "data")],
+    r = v2_call([("data-graph", "figure"), ("info", "children"), ("message", "children"), ("view", "data"),
+                 ("profile", "data")],
                 [("logger", "value", logger), ("period", "start_date", start),
                  ("period", "end_date", end), ("resolution", "value", resolution)])
     if r["message"]["children"]:
@@ -260,7 +264,31 @@ def v2_load(logger, start, end, resolution):
     p0 = values(pressure[0]["y"])[0] if pressure else None
     if p0 is None or abs(p0 - 101.3) > 0.2:
         fail(f"v2 {resolution}: first pressure value {p0}, expected about 101.3 (kPa)")
-    return fig, view
+    store = r["profile"]["data"] or {}
+    if store.get("depths") != [0.1, 0.25, 0.5] or store.get("n") != 5:
+        fail(f"v2 {resolution}: profile store depths {store.get('depths')}, {store.get('n')} days")
+    return fig, view, store
+
+
+def check_v2_profile(store):
+    r = v2_call([("profile-day", p) for p in ("min", "max", "marks", "value")]
+                + [("profile-body", "style"), ("profile-note", "children")], [("profile", "data", store)])
+    slider = r["profile-day"]
+    if slider["value"] != slider["max"] or slider["max"] - slider["min"] != 4 or r["profile-note"]["children"]:
+        fail(f"v2 profile slider: {slider}, note {r['profile-note']['children']}")
+    outputs = v2_duplicate_outputs([("profile-graph", "figure"), ("profile-label", "children"),
+                                    ("data-graph", "figure")])
+    r = call(outputs, [("profile-day", "value", slider["value"]), ("profile-envelope", "value", "both"),
+                       ("profile", "data", store)], base=V2)
+    fig = r["profile-graph"]["figure"]
+    metas = [t.get("meta") for t in fig.get("data", [])]
+    mean = next((t for t in fig["data"] if t.get("meta") == "mean"), {})
+    if metas != ["annual-max", "annual-min", "day-band", "mean"] or values(mean.get("y") or []) != [-0.1, -0.25, -0.5]:
+        fail(f"v2 profile: traces {metas}, depths {mean.get('y')}")
+    ops = (r.get("data-graph", {}).get("figure") or {}).get("operations") or []
+    if [op.get("location") for op in ops] != [["layout", "shapes"]]:
+        fail(f"v2 profile day marker: {json.dumps(ops)[:300]}")
+    return len(metas)
 
 
 def check_v2_callback():
@@ -280,11 +308,12 @@ def check_v2_callback():
     period = [r["period"][p] for p in props]
     if period != ["2026-10-01", "2026-10-05", "2026-10-01", "2026-10-05"]:
         fail(f"v2 period: {period}")
-    fig, view = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "daily")
+    fig, view, store = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "daily")
+    n_profile = check_v2_profile(store)
     bands = sum(1 for t in fig["data"] if t.get("fill") == "tonexty")
     if view.get("mode") != "daily" or bands != 10:
         fail(f"v2 daily: view {view.get('mode')}, {bands} min/max bands (expected 10)")
-    fig, view = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
+    fig, view, _ = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
     if view.get("mode") != "full" or [t.get("meta") for t in fig["data"]] != view.get("keys"):
         fail(f"v2 full: view {view}")
     outputs = v2_duplicate_outputs([("data-graph", "figure"), ("info", "children"), ("message", "children")])
@@ -295,7 +324,8 @@ def check_v2_callback():
     if len([op for op in ops if op.get("location", [None])[-1] == "x"]) != len(view["keys"]):
         fail(f"v2 zoom: {json.dumps(r)[:300]}")
     print(f"OK v2: 3 masts, Mast 6 default {CAMPBELL_M6}, period {period[2]}..{period[3]}, "
-          f"{len(V2_ROWS)} rows Daily ({bands} bands) and Full ({len(view['keys'])} lines), zoom patched")
+          f"{len(V2_ROWS)} rows Daily ({bands} bands) and Full ({len(view['keys'])} lines), zoom patched, "
+          f"profile of the last day ({n_profile} traces, day marked)")
 
 
 if __name__ == "__main__":

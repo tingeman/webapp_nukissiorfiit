@@ -134,3 +134,9 @@ body {
 @media (max-width: 767.98px) {
   .nuki-title { font-size: 1.3rem; }
 }
+
+/* ---- ground temperature profile (T10) --------------------------------------------------- */
+.nuki-profile-note { color: var(--nuki-muted); font-size: 0.9rem; }
+.nuki-profile-note:empty { display: none; }
+/* room below the slider for its always-visible date tooltip */
+.nuki-profile-slider { padding: 0.25rem 0.5rem 2.2rem; }
