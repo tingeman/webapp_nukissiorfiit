@@ -239,6 +239,61 @@ class RawTest(StubTestCase):
         self.error(RAW, 404, "STATION_NOT_FOUND", station="NOPE", **day)
 
 
+DAILY = "/mdb/api/v2/measurements/daily"
+
+
+class DailyTest(StubTestCase):
+    def daily(self, **params):
+        return self.ok(DAILY, **params)
+
+    def test_shape(self):
+        """v2 daily: UTC days, the columns of raw, mean/min/max/count per column aligned with time, meta"""
+        params = {"deveui": TB6, "start": "2026-09-01T00:00:00Z", "end": "2026-09-05T00:00:00Z"}
+        body = self.daily(**params)
+        raw = self.raw(**params)
+        self.assertEqual(set(body), {"request", "time", "columns", "values", "meta"})
+        self.assertEqual(body["time"], ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"])
+        self.assertEqual(body["columns"], raw["columns"])
+        self.assertEqual(set(body["values"]), {"mean", "min", "max", "count"})
+        for k in ("mean", "min", "max", "count"):
+            self.assertEqual(len(body["values"][k]), 11)
+            self.assertTrue(all(len(v) == 5 for v in body["values"][k]))
+        self.assertEqual((body["meta"]["resolution"], body["meta"]["row_count"], body["meta"]["column_count"]),
+                         ("daily", 5, 11))
+        i = [c["key"] for c in body["columns"]].index("BatteryVoltage__BatteryVoltage")
+        self.assertEqual([body["values"][k][i][0] for k in ("min", "max", "count")], [3.693, 3.7, 8])
+        self.assertAlmostEqual(body["values"]["mean"][i][0], 3.6965)
+        self.assertEqual(body["values"]["count"][i], [8, 8, 8, 8, 1])
+
+    def test_inclusive_partial_day(self):
+        """v2 daily: start and end filter the raw timestamps, so a partial day counts only its part"""
+        body = self.daily(deveui=TB6, start="2026-09-01T12:00:00Z", end="2026-09-02T03:00:00Z")
+        i = [c["key"] for c in body["columns"]].index("BatteryVoltage__BatteryVoltage")
+        self.assertEqual((body["time"], body["values"]["count"][i]), (["2026-09-01", "2026-09-02"], [4, 2]))
+
+    def test_missing_days(self):
+        """v2 daily: a column without measurements on a day has null mean/min/max and count 0"""
+        body = self.daily(station="SIS2024-01", start="2026-09-05T00:00:00Z", end="2026-10-01T00:00:00Z")
+        self.assertEqual(body["time"], ["2026-09-05", "2026-10-01"])
+        keys = [c["key"] for c in body["columns"]]
+        tb = keys.index("device10__BatteryVoltage__BatteryVoltage")
+        cs = keys.index("12096__BatteryVoltage__BatteryVoltage")
+        self.assertEqual((body["values"]["count"][tb], body["values"]["mean"][tb][1]), ([1, 0], None))
+        self.assertEqual(body["values"]["count"][cs], [0, 1])
+
+    def test_errors_and_masked(self):
+        """v2 daily: the errors of raw; include_masked adds no masked array; gzip when accepted"""
+        day = {"start": "2026-10-01T00:00:00Z", "end": "2026-10-01T00:00:00Z"}
+        self.error(DAILY, 400, "INVALID_QUERY", deveui=TB6, start="2026-10-02T00:00:00Z", end="2026-10-01T00:00:00Z")
+        self.error(DAILY, 400, "AMBIGUOUS_SELECTOR", serial="12096", **day)
+        self.error(DAILY, 404, "DEVEUI_NOT_FOUND", deveui="0000000000000000", **day)
+        self.error(DAILY, 404, "STATION_NOT_FOUND", station="NOPE", **day)
+        self.assertNotIn("masked", self.daily(deveui=TB6, include_masked="true", start="2026-09-01T00:00:00Z",
+                                              end="2026-09-02T00:00:00Z"))
+        status, hdrs, _b = self.call(DAILY, headers={"Accept-Encoding": "gzip"}, deveui=TB6, **day)
+        self.assertEqual((status, hdrs.get("Content-Encoding")), (200, "gzip"))
+
+
 class ServerTest(StubTestCase):
     def test_gzip(self):
         """v2 raw is gzip-compressed only when the request sends Accept-Encoding: gzip"""

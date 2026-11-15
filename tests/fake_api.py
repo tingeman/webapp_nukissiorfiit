@@ -12,6 +12,7 @@ production form http://host/mdb/api/v1/... and the root form http://host/mdb/api
   GET <prefix>/api/v1/metadata           <fixtures-dir>/metadata.json, narrowed by station/serial
   GET <prefix>/api/v2/metadata           the same plus first/last_measurement_time
   GET <prefix>/api/v2/measurements/raw   columnar data of <fixtures-dir>/measurements_v2.json
+  GET <prefix>/api/v2/measurements/daily per UTC day mean/min/max/count of the same data
 
 The fixtures are written by fixtures/make_fixtures.py (see its docstring for the stations,
 devices, ids and periods). metadata.json is the v1 metadata shape; its timeseries carry the
@@ -38,6 +39,11 @@ The shapes and rules follow monitoring_db (docs/read_api.md, app/monitoring_db/v
   series name, device id, series id), values (one array per column aligned with time, null
   where missing), meta. Gzip-compressed (Content-Encoding: gzip) when the request sends
   Accept-Encoding: gzip.
+* v2 daily: the same parameters, selectors, errors and columns as raw; time is the UTC days
+  with data ("YYYY-MM-DD"), values is {"mean", "min", "max", "count"}, each one array per
+  column aligned with time (null and count 0 on a day without data in that column),
+  meta.resolution "daily", no "masked" array. A column of several timeseries takes the whole
+  day from the highest-ranked one with data that day. Gzip as raw.
 * errors: {"error": {"code", "message", "details"}}: 400 INVALID_QUERY / AMBIGUOUS_SELECTOR,
   404 DEVEUI_NOT_FOUND / SERIAL_NOT_FOUND / STATION_NOT_FOUND. 504 and 500 only via force.
 
@@ -293,7 +299,10 @@ def _sensor_matches(sensor, series, f):
     )
 
 
-def measurements_raw(fixtures, params):
+def _measurement_columns(fixtures, params):
+    """(parsed request, station_mode, columns, merged) shared by /raw and /daily, or the error
+    response: columns are the column details in /raw order, merged maps each key to its
+    [(rank, {datetime: value})] members (several timeseries with the same key)."""
     try:
         f = parse_measurement_request(params)
         meta = fixtures["metadata"]
@@ -336,41 +345,85 @@ def measurements_raw(fixtures, params):
         found.append((points[0][0], rank, key, detail, dict(points)))
 
     found.sort(key=lambda x: (x[0], x[1]))
-    axis = sorted({when for *_rest, points in found for when in points})
-    # Same key: one column; position and details of the first, the last-ranked series wins
+    # Same key: one column; position and details of the first
     columns, merged = [], {}
     for _first, rank, key, detail, points in found:
         if key not in merged:
             columns.append(detail)
             merged[key] = []
         merged[key].append((rank, points))
-    values = []
-    for detail in columns:
-        members = sorted(merged[detail["key"]], key=lambda m: m[0], reverse=True)
-        values.append([next((p[when] for _r, p in members if when in p), None) for when in axis])
+    for members in merged.values():
+        members.sort(key=lambda m: m[0], reverse=True)    # highest rank first
+    return f, station_mode, columns, merged
 
-    payload = {
+
+def _measurement_payload(f, station_mode, resolution, time, columns, values):
+    return {
         "request": {
             "deveui": f["deveui"], "serial": f["serial"], "station": f["station"],
             "start": _iso(f["start"]), "end": _iso(f["end"]),
             "filters": {k: f[k] for k in ("sensor_name", "sensor_name__in", "sensor_type", "timeseries_name",
                                           "relative_z", "relative_z_min", "relative_z_max")},
         },
-        "time": [_iso(when) for when in axis],
+        "time": time,
         "columns": columns,
         "values": values,
         "meta": {
-            "row_count": len(axis), "column_count": len(columns), "format": "columnar",
-            "resolution": "raw", "sorted": "timestamp_asc", "timezone": "UTC",
+            "row_count": len(time), "column_count": len(columns), "format": "columnar",
+            "resolution": resolution, "sorted": "timestamp_asc", "timezone": "UTC",
             "column_key_source": "canonical_db_fields",
             "column_key_pattern": ("<device>__<sensor.name>__<timeseries.name>" if station_mode
                                    else "<sensor.name>__<timeseries.name>"),
             "calibrated": f["calibrated"],
         },
     }
+
+
+def measurements_raw(fixtures, params):
+    shared = _measurement_columns(fixtures, params)
+    if len(shared) == 2:
+        return shared
+    f, station_mode, columns, merged = shared
+    axis = sorted({when for members in merged.values() for _r, points in members for when in points})
+    # at each timestamp the value of the last-ranked (highest) timeseries with data wins
+    values = [[next((p[when] for _r, p in merged[c["key"]] if when in p), None) for when in axis]
+              for c in columns]
+    payload = _measurement_payload(f, station_mode, "raw", [_iso(when) for when in axis], columns, values)
     if f["include_masked"]:
         payload["masked"] = [[None if v is None else False for v in col] for col in values]
     return 200, payload
+
+
+def measurements_daily(fixtures, params):
+    """Per UTC day and column: mean, min, max and count of the measurements in start..end.
+    A column of several timeseries takes the whole day from the highest-ranked member with
+    data on that day (read_api.md). No "masked" array (include_masked only widens the data)."""
+    shared = _measurement_columns(fixtures, params)
+    if len(shared) == 2:
+        return shared
+    f, station_mode, columns, merged = shared
+
+    def by_day(points):
+        days = {}
+        for when, value in points.items():
+            if value is not None:
+                days.setdefault(when.astimezone(timezone.utc).date(), []).append(value)
+        return days
+
+    per_column = [[by_day(points) for _r, points in merged[c["key"]]] for c in columns]
+    axis = sorted({day for members in per_column for days in members for day in days})
+    out = {"mean": [], "min": [], "max": [], "count": []}
+    for members in per_column:
+        col = {k: [] for k in out}
+        for day in axis:
+            vals = next((days[day] for days in members if day in days), None)
+            col["mean"].append(None if vals is None else sum(vals) / len(vals))
+            col["min"].append(None if vals is None else min(vals))
+            col["max"].append(None if vals is None else max(vals))
+            col["count"].append(0 if vals is None else len(vals))
+        for k in out:
+            out[k].append(col[k])
+    return 200, _measurement_payload(f, station_mode, "daily", [d.isoformat() for d in axis], columns, out)
 
 
 # ---- server -------------------------------------------------------------------------------
@@ -380,6 +433,7 @@ ROUTES = [
     ("/api/v1/metadata", metadata, False),
     ("/api/v2/metadata", metadata_v2, False),
     ("/api/v2/measurements/raw", measurements_raw, True),
+    ("/api/v2/measurements/daily", measurements_daily, True),
 ]
 
 

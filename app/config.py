@@ -27,6 +27,11 @@ class ConfigSettings(BaseSettings):
     # Most /raw requests in flight at once per data call, and the years per /raw request
     backend_api_max_parallel: int = Field(2, gt=0, env="BACKEND_API_MAX_PARALLEL")
     backend_api_raw_chunk_years: int = Field(1, gt=0, env="BACKEND_API_RAW_CHUNK_YEARS")
+    # Phase 2 page (app/v2/): hydrological years (from 1 August) per /daily request
+    backend_api_daily_chunk_years: int = Field(3, gt=0, env="BACKEND_API_DAILY_CHUNK_YEARS")
+    # Phase 2 download: no new API request is started after this many seconds (must stay
+    # below nginx's proxy_read_timeout minus BACKEND_API_TIMEOUT_SECONDS and the build time)
+    download_time_budget_s: float = Field(75.0, gt=0, env="DOWNLOAD_TIME_BUDGET_S")
     # Stations whose identifier fully matches this regular expression are shown
     nuki_station_pattern: str = Field(r"^(SIS2024-0[1-5]|NUKI202[0-9]-.+)$", env="NUKI_STATION_PATTERN")
 
