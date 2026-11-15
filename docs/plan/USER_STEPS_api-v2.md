@@ -15,7 +15,7 @@ Do these in this order (the boxes below are ticked as you go):
 | # | What | Where | Wait for |
 |---|---|---|---|
 | A | Step 4: your second look at phase 2, locally | this repo | - |
-| B | Step 3: deploy nginx (web server steps 6, 7) and the open phase 1 `main` (web server step 4) | dtu_sus_web_server runbook | - (can run in parallel with A) |
+| B | Step 3: deploy nginx (web server steps 6, 7; its step 4 is optional) | dtu_sus_web_server runbook | - (can run in parallel with A) |
 | C | Step 5.3: build and test `2026.3` | dtu_sus_web_server checkout, WSL | A is OK |
 | D | Step 5.4: pin, deploy, check (web server steps 8-10) | dtu_sus_web_server runbook | B and C |
 | E | Step 5.5: this repo's `main` to `2026.3` | this repo | D is OK |
@@ -115,11 +115,11 @@ git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phase1   # --
 
 - [ ] Done (= dtu_sus_web_server steps 6 and 7 ticked there)
 
-`proxy_read_timeout 120s` for `/app/nuki/` is merged in dtu_sus_web_server (`a603fbe`) but not live: the nuki playbook does not reload nginx. Everything happens in dtu_sus_web_server: open `C:\thin\02_Code\docker_projects\dtu_sus_web_server\docs\plan\USER_STEPS_api-v2.md` and do step 4 (its `main` after the phase 1 deploy, still open), step 6 (deploy nginx) and step 7. Nothing to do in this repo.
+`proxy_read_timeout 120s` for `/app/nuki/` is merged in dtu_sus_web_server (`a603fbe`) but not live: the nuki playbook does not reload nginx. Everything happens in dtu_sus_web_server: open `C:\thin\02_Code\docker_projects\dtu_sus_web_server\docs\plan\USER_STEPS_api-v2.md` and do step 6 (deploy nginx) and step 7 (its step 4 is optional). Nothing to do in this repo.
 
 ## 4. Review phase 2 (second look)
 
-- [ ] Done (first look 2026-11-15: findings fixed in T16 `90b95a5`; T17 `cfdb573` makes the first load faster)
+- [x] Done 2026-11-15 (first look: findings fixed in T16 `90b95a5`; T17 `cfdb573` makes the first load faster; second look all OK, profile placement noted as roadmap R10)
 
 This checkout is on `agent-api-v2-phase2`, which is the tagged code `2026.3`, so you review exactly what will be built.
 

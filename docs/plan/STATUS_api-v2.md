@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 (2026.2) deployed and checked. Phase 2 (T8-T13, T16, T17) tagged 2026.3 at `9a95a5a` and pushed 2026-11-15 (T14 steps 5.1-5.2, before the review); not built. Next, all yours (USER_STEPS, table at the top): second look (step 4), nginx deploy (step 3), then build, deploy, `main` (5.3-5.5). Review findings: fix on `agent-api-v2-phase2`, release as 2026.4.
+Phase 1 (2026.2) deployed and checked. Phase 2 (T8-T13, T16, T17) tagged 2026.3 at `9a95a5a` and pushed 2026-11-15 (T14 steps 5.1-5.2, before the review); not built. Second look (step 4) all OK 2026-11-15 (profile placement: roadmap R10). Next, all yours (USER_STEPS, table at the top): nginx deploy (step 3), then build, deploy, `main` (5.3-5.5). Review findings: fix on `agent-api-v2-phase2`, release as 2026.4.
 
 ## Done
 
