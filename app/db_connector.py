@@ -59,6 +59,10 @@ class QueryTimeout(Exception):
     pass
 
 
+class BackendUnreachable(RuntimeError):
+    """The API could not be reached (connection refused or no route), after the connect retries."""
+
+
 # ---- transport --------------------------------------------------------------------------------
 
 _API_SUFFIX = re.compile(r"/api/v[12]$")
@@ -107,7 +111,8 @@ def _build_session():
 def _api_get(path, params):
     """JSON of GET <root>/<path> (path e.g. "api/v2/metadata"), errors mapped to the module's
     exceptions: 404 RecordingDeviceNotFound, 504 or timeout QueryTimeout, 400 ValueError
-    (the API's message), other >= 500, transport errors and invalid JSON RuntimeError."""
+    (the API's message), connection errors BackendUnreachable (a RuntimeError), other >= 500,
+    other transport errors and invalid JSON RuntimeError."""
     url = f"{_root_url()}/{path.lstrip('/')}"
 
     try:
@@ -115,6 +120,8 @@ def _api_get(path, params):
             response = session.get(url, params=params, timeout=settings.backend_api_timeout_seconds)
     except requests.Timeout as exc:
         raise QueryTimeout("Backend API request timed out") from exc
+    except requests.ConnectionError as exc:
+        raise BackendUnreachable(f"Backend API transport error (not reachable): {exc}") from exc
     except requests.RequestException as exc:
         raise RuntimeError(f"Backend API transport error: {exc}") from exc
 

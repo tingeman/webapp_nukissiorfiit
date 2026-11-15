@@ -94,6 +94,8 @@ def error_message(exc, logger_name=""):
         return "No data found for the given query"
     if isinstance(exc, db_connector.RecordingDeviceNotFound):
         return f"Recording device {logger_name} not found"
+    if isinstance(exc, db_connector.BackendUnreachable):
+        return "Backend not reachable"
     return "An unknown error occurred"
 
 

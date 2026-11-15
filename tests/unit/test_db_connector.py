@@ -144,10 +144,10 @@ class RetryTest(ApiTestCase):
         self.assertEqual(len(connections), 1)
 
     def test_connection_refused(self):
-        """an unreachable API (connection refused, retried) raises RuntimeError (transport error)"""
+        """an unreachable API (connection refused, retried) raises BackendUnreachable (a RuntimeError)"""
         self.set_settings(backend_api_base_url=f"http://127.0.0.1:{closed_port()}/mdb",
                           backend_api_max_retries=2)
-        with self.assertRaisesRegex(RuntimeError, "transport error"):
+        with self.assertRaisesRegex(db_connector.BackendUnreachable, "not reachable"):
             db_connector.get_logger_data(TEKBOX_M6, "2026-09-01", "2026-09-05")
 
     def test_accept_gzip(self):

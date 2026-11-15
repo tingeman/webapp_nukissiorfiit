@@ -55,11 +55,12 @@ class HelperTest(ApiTestCase):
                                               "min_date_allowed": "2026-09-01", "max_date_allowed": "2026-09-05"})
 
     def test_error_message(self):
-        """error_message() gives the page's messages for timeout, no data, logger not found and other errors"""
+        """error_message() gives the page's messages for timeout, no data, logger not found, unreachable backend and other errors"""
         self.assertEqual(app.error_message(db_connector.QueryTimeout("x")), "Backend request timed out")
         self.assertEqual(app.error_message(db_connector.EmptyQuerySet("x")), "No data found for the given query")
         self.assertEqual(app.error_message(db_connector.RecordingDeviceNotFound("x"), "CR300_M6 12096"),
                          "Recording device CR300_M6 12096 not found")
+        self.assertEqual(app.error_message(db_connector.BackendUnreachable("x")), "Backend not reachable")
         self.assertEqual(app.error_message(RuntimeError("x")), "An unknown error occurred")
 
     def test_figures_tekbox(self):
