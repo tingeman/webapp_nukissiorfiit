@@ -21,9 +21,11 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
              pressure in kPa, the two angles, sensor temperature, battery; mean lines with
              min/max bands) and Full (the same rows, one line per series), each with the
              profile store (the 3 ground temperature depths), zoom_data on a window of the
-             Full figure (its traces patched), and setup_profile/draw_profile (the slider on
+             Full figure (its traces patched), setup_profile/draw_profile (the slider on
              the last day, the profile of that day with the annual envelope, the day marked
-             on the data figure)
+             on the data figure), and "All loggers" of Mast 6 in Daily (the dropdown's last
+             option, the period over both loggers, one line per depth over both, a dashed
+             line at the logger change)
 """
 import base64
 import json
@@ -249,13 +251,19 @@ def v2_duplicate_outputs(outputs):
     fail(f"v2: no callback with the outputs {wanted}")
 
 
-def v2_load(logger, start, end, resolution):
+def v2_load_raw(logger, start, end, resolution, masts=None):
     r = v2_call([("data-graph", "figure"), ("info", "children"), ("message", "children"), ("view", "data"),
                  ("profile", "data")],
                 [("logger", "value", logger), ("period", "start_date", start),
-                 ("period", "end_date", end), ("resolution", "value", resolution)])
+                 ("period", "end_date", end), ("resolution", "value", resolution)],
+                state=[("masts", "data", masts)])
     if r["message"]["children"]:
-        fail(f"v2 {resolution}: message {json.dumps(r['message']['children'])[:300]}")
+        fail(f"v2 {logger} {resolution}: message {json.dumps(r['message']['children'])[:300]}")
+    return r
+
+
+def v2_load(logger, start, end, resolution):
+    r = v2_load_raw(logger, start, end, resolution)
     fig, view = r["data-graph"]["figure"], r["view"]["data"]
     titles = [a.get("text") for a in fig.get("layout", {}).get("annotations", [])]
     if titles != V2_ROWS:
@@ -291,6 +299,31 @@ def check_v2_profile(store):
     return len(metas)
 
 
+def check_v2_all_loggers(masts):
+    """All loggers of Mast 6, Daily: the period over both loggers, the ground temperature
+    lines over both, broken at the change, one dashed line at the Campbell's first day."""
+    value = "all:Mast 6"
+    props = ["min_date_allowed", "max_date_allowed", "start_date", "end_date"]
+    r = v2_call([("period", p) for p in props] + [("period", "initial_visible_month")],
+                [("logger", "value", value)], state=[("masts", "data", masts)])
+    period = [r["period"][p] for p in props]
+    if period != ["2026-09-01", "2026-10-05", "2026-09-01", "2026-10-05"]:
+        fail(f"v2 All loggers period: {period}")
+    r = v2_load_raw(value, period[2], period[3], "daily", masts)
+    fig, view = r["data-graph"]["figure"], r["view"]["data"] or {}
+    titles = [a.get("text") for a in fig.get("layout", {}).get("annotations", [])]
+    ground = [t for t in fig.get("data", []) if t.get("yaxis") in (None, "y") and "customdata" in t]
+    spans = {(t["x"][0], t["x"][-1]) for t in ground}
+    shapes = [(s.get("x0"), s.get("line", {}).get("dash")) for s in fig.get("layout", {}).get("shapes", [])]
+    if len(ground) != 3 or spans != {("2026-09-01", "2026-10-05")} or not all(None in values(t["y"]) for t in ground):
+        fail(f"v2 All loggers: ground traces {[t.get('name') for t in ground]}, spans {spans}")
+    if shapes != [("2026-10-01 00:00:00", "dash")] or "CR300_M6 (12096)" not in titles:
+        fail(f"v2 All loggers: change markers {shapes}, labels {titles}")
+    if [lg.get("value") for lg in view.get("loggers", [])] != [TEKBOX_M6, CAMPBELL_M6]:
+        fail(f"v2 All loggers: view {json.dumps(view)[:300]}")
+    return len([t for t in titles if t != "CR300_M6 (12096)"])
+
+
 def check_v2_callback():
     r = v2_call([("masts", "data"), ("mast", "options"), ("mast", "value"), ("masts-message", "children")],
                 [("url", "pathname", "/app/nuki/v2/")])
@@ -300,7 +333,7 @@ def check_v2_callback():
         fail(f"v2 masts: options {names}, value {r['mast']['value']!r}, message {r['masts-message']['children']}")
     r = v2_call([("logger", "options"), ("logger", "value")], [("mast", "value", "Mast 6")],
                 state=[("masts", "data", masts)])
-    if r["logger"]["value"] != CAMPBELL_M6 or len(r["logger"]["options"]) != 2:
+    if r["logger"]["value"] != CAMPBELL_M6 or len(r["logger"]["options"]) != 3             or r["logger"]["options"][-1] != {"label": "All loggers", "value": "all:Mast 6"}:
         fail(f"v2 Mast 6 loggers: {r['logger']}")
     props = ["min_date_allowed", "max_date_allowed", "start_date", "end_date"]
     r = v2_call([("period", p) for p in props] + [("period", "initial_visible_month")],
@@ -323,9 +356,11 @@ def check_v2_callback():
     ops = (r.get("data-graph", {}).get("figure") or {}).get("operations") or []
     if len([op for op in ops if op.get("location", [None])[-1] == "x"]) != len(view["keys"]):
         fail(f"v2 zoom: {json.dumps(r)[:300]}")
+    n_all = check_v2_all_loggers(masts)
     print(f"OK v2: 3 masts, Mast 6 default {CAMPBELL_M6}, period {period[2]}..{period[3]}, "
           f"{len(V2_ROWS)} rows Daily ({bands} bands) and Full ({len(view['keys'])} lines), zoom patched, "
-          f"profile of the last day ({n_profile} traces, day marked)")
+          f"profile of the last day ({n_profile} traces, day marked); All loggers of Mast 6: {n_all} rows, "
+          f"one change marker")
 
 
 if __name__ == "__main__":

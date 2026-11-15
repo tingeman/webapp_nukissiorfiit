@@ -25,8 +25,18 @@ DECIMALS):
      "x_range": [lo, hi] (°C, whole degrees, all days: the axis stays put while sliding)}
 
 A logger (or period) without ground temperatures gives ``{"logger", "keys": []}``; a failed
-profile request in Full mode adds ``"error": <page text>``. Size: 4 numbers per depth and
-day (about 25 bytes in JSON), e.g. about 90 KB for 5 depths over two years.
+profile request in Full mode adds ``"error": <page text>``.
+
+All loggers (T11): the store is built from the joined ground temperatures (join.py: one
+series per depth and station, spanning the loggers; on a day two loggers both recorded, the
+later logger's value is kept). Then it also has ``"stations"`` (the station of each row) and
+``"changes"`` (the logger changes, join.Joined.changes, so the day marker patch keeps their
+lines). With several stations (Mast 9: two strings a few metres apart) a day's profile and
+its annual envelope use one station only (``for_day``): the station with data on that day
+(the later one if both have), else the one with the latest data before it.
+
+Size: 4 numbers per depth and day (about 25 bytes in JSON), e.g. about 90 KB for 5 depths
+over two years.
 """
 from __future__ import annotations
 
@@ -35,7 +45,7 @@ import math
 
 import numpy as np
 
-from . import trumpet
+from . import join, trumpet
 
 DECIMALS = 2                 # °C; the sensors' accuracy is about 0.1 °C
 WINDOW_DAYS = 365            # the annual envelope: the 365 days up to the chosen day
@@ -79,11 +89,13 @@ def store_data(selected: list, logger_value) -> dict:
     if not items:
         return empty(logger_value)
     days = [s.series.time.astype("datetime64[D]").astype(np.int64) for s in items]
-    first = int(min(d[0] for d in days))
-    n = int(max(d[-1] for d in days)) - first + 1
+    first = int(min(d.min() for d in days))       # joined series: not sorted across loggers
+    n = int(max(d.max() for d in days)) - first + 1
     out = {"logger": logger_value, "keys": [s.key for s in items], "labels": [s.label for s in items],
            "depths": [round(-float(s.series.details["relative_z"]), 3) for s in items],
            "first": first, "n": n, "mean": [], "min": [], "max": [], "count": []}
+    if any(join.is_joined(s) for s in items):
+        out["stations"] = [join.station(s) for s in items]
     lo, hi = math.inf, -math.inf
     for s, d in zip(items, days):
         idx = d - first
@@ -98,6 +110,45 @@ def store_data(selected: list, logger_value) -> dict:
     lo, hi = math.floor(lo), math.ceil(hi)
     out["x_range"] = [lo, hi if hi > lo else lo + 1]
     return out
+
+
+_ROWS = ("keys", "labels", "depths", "mean", "min", "max", "count", "stations")
+
+
+def station_of_day(store, day: int):
+    """The station a day's profile uses (None unless the store has several stations): the
+    one with data on that day (the one whose data starts later if both have), else the one
+    with the latest data before it, else the one whose data starts first."""
+    stations = store.get("stations") or []
+    if len(set(stations)) < 2:
+        return None
+    i = min(max(day - store["first"], 0), store["n"] - 1)
+    days = {}           # station -> day indices with data, any depth
+    for st in dict.fromkeys(stations):
+        rows = [r for r, s in enumerate(stations) if s == st]
+        days[st] = np.flatnonzero(np.any(np.asarray([store["count"][r] for r in rows]) > 0, axis=0))
+    order = sorted(days, key=lambda st: days[st][0] if len(days[st]) else store["n"])
+    best, best_i = order[0], -1
+    for st in order:            # by start; a later start wins a tie
+        before = days[st][days[st] <= i]
+        last = int(before[-1]) if len(before) else -1
+        if last >= 0 and last >= best_i:
+            best, best_i = st, last
+    return best
+
+
+def for_day(store, day: int):
+    """(store, station) for drawing ``day``: with several stations the store narrowed to the
+    rows of station_of_day (same days and axis range); otherwise the store and None."""
+    st = station_of_day(store, day)
+    if st is None:
+        return store, None
+    rows = [r for r, s in enumerate(store["stations"]) if s == st]
+    out = dict(store)
+    for name in _ROWS:
+        if name in store:
+            out[name] = [store[name][r] for r in rows]
+    return out, st
 
 
 def has_profile(store) -> bool:

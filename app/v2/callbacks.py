@@ -18,7 +18,8 @@ Data flow (requests per action in the plan, "Phase 2 design"):
    one year (a longer period loads the year up to its end date, 365 or 366 days, and the info
    line says so; with BACKEND_API_RAW_CHUNK_YEARS=1 that is always one /raw request), thinned to about figures.MAX_POINTS points per series. The ``view`` store keeps what
    the figure shows: {"logger", "mode", "range": [lo, hi] ISO datetimes, "keys": the API
-   column key of each trace (None for band traces), "note"}.
+   column key of each trace (None for band traces; All loggers: the join key), "note",
+   All loggers also "loggers": the mast's catalogue loggers}.
 5. Zoom (``data-graph.relayoutData``) in Full: /raw for the visible window only (one request
    set, exactly the window's datetimes), thinned and patched into the traces by key (the
    figure's zoom stays as the user left it); autorange (reset) loads the stored range again.
@@ -30,6 +31,18 @@ Data flow (requests per action in the plan, "Phase 2 design"):
    default the last day) or hides the profile with a note; the slider, the envelope choice
    or a new store draw the profile from the store alone (no API request) and mark the day
    on the data figure (a Patch of its shapes).
+
+7. All loggers (T11): the logger dropdown's last option (``all:<mast name>``, only for a mast
+   with 2 or more loggers). The date limits and default cover the union of the loggers'
+   periods. The loggers whose period overlaps the range are fetched one after the other
+   (never two loggers' requests in flight; an ApiError stops, the loggers after it are not
+   fetched, and nothing half-joined is shown), each for its part of the range only, and
+   joined by join.join (per station: ground temperature by depth, the rest by series name),
+   with a dashed line at each logger change. Daily: one /daily request set per logger. Full:
+   /raw for the one-year window (full_period) per logger with data in it, then the profile's
+   /daily per such logger. The ``view`` store then also holds the mast's ``loggers``, and a
+   zoom refetches /raw for the window per logger with data in it. The ``profile`` store comes
+   from the joined ground temperatures (profile.for_day picks one station per day).
 
 Problems end up as an alert on the page (``str(ApiError)``, texts.py) and one log line,
 never as a traceback on the page.
@@ -45,7 +58,7 @@ import uuid
 import dash_bootstrap_components as dbc
 from dash import Input, Output, Patch, State, html, no_update
 
-from . import api_client, figures, profile, texts
+from . import api_client, figures, join, profile, texts
 
 logger = logging.getLogger("nuki.v2")
 
@@ -90,6 +103,67 @@ def _utc_now() -> dt.datetime:
 
 def find_mast(masts, name):
     return next((m for m in masts or [] if m["name"] == name), None)
+
+
+ALL_PREFIX = "all:"
+
+
+def all_value(mast_name: str) -> str:
+    """The logger dropdown value of "All loggers" of a mast."""
+    return ALL_PREFIX + mast_name
+
+
+def is_all(value) -> bool:
+    return isinstance(value, str) and value.startswith(ALL_PREFIX)
+
+
+def logger_options(mast) -> list:
+    """The logger dropdown options of a catalogue mast: its loggers, and "All loggers" last
+    when it has 2 or more."""
+    options = [{"label": lg["label"], "value": lg["value"]} for lg in mast["loggers"]]
+    if len(mast["loggers"]) >= 2:
+        options.append({"label": texts.LOGGER_ALL, "value": all_value(mast["name"])})
+    return options
+
+
+def logger_period(masts, value):
+    """(first, last) "YYYY-MM-DD" of a logger value (All loggers: the union of the mast's
+    loggers' periods), or None."""
+    if is_all(value):
+        mast = find_mast(masts, value[len(ALL_PREFIX):])
+        loggers = [lg for lg in (mast or {}).get("loggers", []) if lg.get("last")]
+        if not loggers:
+            return None
+        return (min((lg.get("first") or lg["last"])[:10] for lg in loggers),
+                max(lg["last"][:10] for lg in loggers))
+    lg = find_logger(masts, value)
+    if lg is None or not lg.get("last"):
+        return None
+    return (lg.get("first") or lg["last"])[:10], lg["last"][:10]
+
+
+def overlapping(loggers, start: dt.date, end: dt.date) -> list:
+    """[(logger, first, last)] of the loggers whose period overlaps the days start..end, each
+    with the overlap (dates), in the given (catalogue) order."""
+    out = []
+    for lg in loggers or []:
+        first, last = _date(lg.get("first") or lg.get("last")), _date(lg.get("last"))
+        if first is None or last is None:
+            continue
+        a, b = max(start, first), min(end, last)
+        if a <= b:
+            out.append((lg, a, b))
+    return out
+
+
+def fetch_each(fetch, items) -> list:
+    """[(logger, result)] of ``fetch(logger value, start, end)`` for each (logger, start, end),
+    one after the other; an ApiError propagates at once (the loggers after it are not
+    fetched)."""
+    out = []
+    for lg, a, b in items:
+        out.append((lg, fetch(lg["value"], a, b)))
+    return out
 
 
 def find_logger(masts, value):
@@ -183,25 +257,40 @@ def info_items(what: str, result, note: str | None = None, profile_result=None):
     the requests one by one (folded). ``profile_result``: the extra /daily of a Full load
     (made after the raw one: the seconds add up); its requests are listed after the raw
     ones, each line with its kind."""
-    parts = [(texts.INFO_KIND_RAW, result)]
-    if profile_result is not None:
-        parts.append((texts.INFO_KIND_PROFILE, profile_result))
-    requests = [(kind, r) for kind, res in parts for r in res.requests]
+    if profile_result is None:
+        return info_parts(what, [(None, result)], note)
+    return info_parts(what, [(texts.INFO_KIND_RAW, result), (texts.INFO_KIND_PROFILE, profile_result)], note)
+
+
+def info_parts(what: str, parts, note: str | None = None, loggers=None):
+    """The info line of several results made one after the other: ``parts`` [(prefix or
+    None, result)], each request line starting with its part's prefix (a kind, or for All
+    loggers "<logger>, <kind>"); ``loggers``: the names of the loggers fetched (All loggers;
+    an empty list says no logger has data in the period)."""
+    requests = [(prefix, r) for prefix, res in parts for r in res.requests]
     api = texts.INFO_REQUESTS.format(requests=len(requests),
                                      seconds=sum(res.wall_seconds for _, res in parts),
                                      size=size_text(sum(res.bytes for _, res in parts)))
     lines = [html.Span(what, className="nuki-info-what"), html.Span(" · " + api, className="nuki-info-api")]
     out = [html.Div(lines)]
+    if loggers is not None:
+        out.append(html.Div(texts.INFO_LOGGERS.format(loggers="; ".join(loggers) or texts.INFO_NO_LOGGER),
+                            className="nuki-info-loggers"))
     if note:
         out.append(html.Div(note, className="nuki-info-note"))
     out.append(html.Details([
         html.Summary(texts.INFO_DETAILS),
-        html.Ul([html.Li((texts.INFO_REQUEST_KIND.format(kind=kind) if profile_result is not None else "")
+        html.Ul([html.Li((texts.INFO_REQUEST_KIND.format(kind=prefix) if prefix else "")
                          + texts.INFO_REQUEST_LINE.format(start=r.start, end=r.end, seconds=r.seconds,
                                                           size=size_text(r.bytes)))
-                 for kind, r in requests], className="nuki-requests"),
+                 for prefix, r in requests], className="nuki-requests"),
     ], className="nuki-details"))
     return out
+
+
+def _prefixed(parts, kind=None) -> list:
+    """[(prefix, result)] of All loggers' [(logger, result)]: "<logger>" or "<logger>, <kind>"."""
+    return [(join.short_label(lg) + (f", {kind}" if kind else ""), res) for lg, res in parts]
 
 
 def _full_what(lo, hi, bin_seconds, zoomed=False):
@@ -216,11 +305,12 @@ def _full_what(lo, hi, bin_seconds, zoomed=False):
     return texts.INFO_THINNED.format(start=_fmt_day(lo), end=_fmt_day(hi), bin=bin_text(bin_seconds))
 
 
-def load(client: api_client.Client, logger_value, start, end, resolution):
+def load(client: api_client.Client, logger_value, start, end, resolution, masts=None):
     """Everything a logger/period/resolution change produces, as plain values: figure,
     info (children), message (alert or None), view (store or None), profile (store or
     None, profile.py). Raises ApiError (not for the profile request of a Full load: its
-    error goes into the profile store, and the Full figure is shown)."""
+    error goes into the profile store, and the Full figure is shown). ``masts``: the
+    catalogue (the ``masts`` store), needed for All loggers only."""
     out = {"figure": figures.empty_figure(texts.FIGURE_EMPTY), "info": None, "message": None,
            "view": None, "profile": None}
     if not logger_value:
@@ -232,6 +322,12 @@ def load(client: api_client.Client, logger_value, start, end, resolution):
     if start > end:
         out["message"] = _alert(texts.PERIOD_REVERSED, "warning")
         return out
+    if is_all(logger_value):
+        mast = find_mast(masts, logger_value[len(ALL_PREFIX):])
+        if mast is None or len(mast.get("loggers") or []) < 2:
+            out["message"] = _alert(texts.CHOOSE_FIRST, "warning")
+            return out
+        return load_all(client, mast, logger_value, start, end, resolution, out)
     try:
         api_client.logger_params(logger_value)
     except ValueError:
@@ -279,6 +375,79 @@ def load(client: api_client.Client, logger_value, start, end, resolution):
     return out
 
 
+def load_all(client: api_client.Client, mast, logger_value, start: dt.date, end: dt.date,
+             resolution, out):
+    """``load`` for All loggers of ``mast`` (see the module docstring, 7.)."""
+    revision = uuid.uuid4().hex[:8]
+    t0 = time.perf_counter()
+    loggers = mast["loggers"]
+    note = None
+    if resolution == "full":
+        start, end, limited = full_period(start, end)
+        note = texts.INFO_FULL_LIMIT if limited else None
+    lo, hi = day_bounds(start, end)
+    items = overlapping(loggers, start, end)
+    if resolution == "full":
+        mode = "full"
+        parts = fetch_each(client.raw, items)
+        joined = join.join([(lg, r.series) for lg, r in parts])
+        rows = figures.rows(joined.series)
+        fig, keys, bin_s = figures.data_figure(rows, "raw", revision, window=(lo, hi), changes=joined.changes)
+        what = _full_what(lo, hi, bin_s)
+        info = _prefixed(parts, texts.INFO_KIND_RAW)
+        # the profile: one /daily request set per logger with data in the window, in turn
+        profile_parts = []
+        try:
+            for lg, a, b in items:
+                profile_parts.append((lg, client.daily(lg["value"], a, b)))
+            pj = join.join([(lg, r.series) for lg, r in profile_parts])
+            out["profile"] = profile.store_data(api_client.ground_temperature(pj.series), logger_value)
+        except api_client.ApiError as e:        # the client logged it
+            out["profile"] = profile.empty(logger_value, str(e))
+        info += _prefixed(profile_parts, texts.INFO_KIND_PROFILE)
+    else:
+        mode = "daily"
+        parts = fetch_each(client.daily, items)
+        joined = join.join([(lg, r.series) for lg, r in parts])
+        rows = figures.rows(joined.series)
+        fig, keys, _ = figures.data_figure(rows, "daily", revision, changes=joined.changes)
+        what = texts.INFO_DAILY.format(start=start.isoformat(), end=end.isoformat())
+        info = _prefixed(parts)
+        out["profile"] = profile.store_data(api_client.ground_temperature(joined.series), logger_value)
+    if profile.has_profile(out["profile"]):
+        out["profile"]["changes"] = joined.changes
+    names = [join.short_label(lg) for lg, _ in parts]
+    n_requests = sum(len(r.requests) for _, r in info)
+    logger.info("v2 load %s %s %s..%s: %d logger(s), %d request(s), API %.2f s, %d bytes, %d rows, "
+                "%d traces, %.2f s", logger_value, mode, lo.isoformat(), hi.isoformat(), len(parts),
+                n_requests, sum(r.wall_seconds for _, r in info), sum(r.bytes for _, r in info),
+                len(rows), len(keys), time.perf_counter() - t0)
+    out["info"] = info_parts(what, info, note, names)
+    if not rows:
+        out["message"] = _alert(texts.NO_DATA_ALL.format(start=start.isoformat(), end=end.isoformat()), "info")
+        return out
+    out["figure"] = fig
+    out["view"] = {"logger": logger_value, "mode": mode, "range": [lo.isoformat(), hi.isoformat()],
+                   "keys": keys, "note": note, "loggers": loggers}
+    return out
+
+
+def zoom_all(client: api_client.Client, view, window):
+    """(series, info parts, logger names) of a zoom with All loggers: /raw for the window per
+    logger with data in it, one after the other, joined."""
+    items = []
+    for lg in view["loggers"]:
+        first, last = _date(lg.get("first") or lg.get("last")), _date(lg.get("last"))
+        if first is None or last is None:
+            continue
+        part = clip_window(window, day_bounds(first, last))
+        if part is not None:
+            items.append((lg, *part))
+    parts = fetch_each(client.raw, items)
+    joined = join.join([(lg, r.series) for lg, r in parts])
+    return joined.series, _prefixed(parts, texts.INFO_KIND_RAW), [join.short_label(lg) for lg, _ in parts]
+
+
 def zoom(client: api_client.Client, relayout, view):
     """(patch, info) of a zoom in Full: /raw for the window (or the stored range on
     autorange), thinned, the traces' x/y/mode replaced by key; None if nothing to do (Daily,
@@ -295,8 +464,12 @@ def zoom(client: api_client.Client, relayout, view):
         window, zoomed = clip_window(target, bounds), True
         if window is None:
             return None
-    result = client.raw(view["logger"], *window)
-    by_key = {sel.key: sel for row in figures.rows(result.series) for sel in row.items}
+    if view.get("loggers"):         # All loggers
+        series, parts, names = zoom_all(client, view, window)
+    else:
+        result = client.raw(view["logger"], *window)
+        series, parts, names = result.series, [(None, result)], None
+    by_key = {sel.key: sel for row in figures.rows(series) for sel in row.items}
     patch = Patch()
     bins = []
     for i, key in enumerate(view["keys"]):
@@ -314,9 +487,9 @@ def zoom(client: api_client.Client, relayout, view):
         patch["data"][i]["mode"] = d["mode"]
     what = _full_what(window[0], window[1], max(bins) if bins else None, zoomed)
     logger.info("v2 zoom %s %s..%s: %d request(s), API %.2f s, %d bytes", view["logger"],
-                window[0].isoformat(), window[1].isoformat(), len(result.requests),
-                result.wall_seconds, result.bytes)
-    return patch, info_items(what, result, view.get("note"))
+                window[0].isoformat(), window[1].isoformat(), sum(len(r.requests) for _, r in parts),
+                sum(r.wall_seconds for _, r in parts), sum(r.bytes for _, r in parts))
+    return patch, info_parts(what, parts, view.get("note"), names)
 
 
 def profile_setup(store):
@@ -334,8 +507,10 @@ def profile_setup(store):
     return first, last, profile.slider_marks(first, last), last, {}, None
 
 
-def profile_label(day: dict, annual, store) -> str:
+def profile_label(day: dict, annual, store, station=None) -> str:
     text = texts.PROFILE_LABEL.format(day=day["day"])
+    if station:
+        text += texts.PROFILE_LABEL_STATION.format(station=station)
     if annual is not None:
         text += "; " + texts.PROFILE_LABEL_ANNUAL.format(start=annual["start"], end=annual["end"],
                                                           valid=annual["valid_days"], days=annual["days"])
@@ -351,13 +526,15 @@ def profile_draw(day_value, envelope, store):
         return None
     day = profile.clamp_day(store, day_value)
     envelope = envelope if envelope in figures.ENVELOPES else "day"
-    p = profile.day_profile(store, day)
-    annual = profile.annual_envelope(store, day) if envelope in ("annual", "both") else None
-    fig = figures.profile_figure(p, annual, envelope, store.get("x_range"), max(store["depths"]),
+    depth_max = max(store["depths"])
+    drawn, station = profile.for_day(store, day)     # several stations: the day's one
+    p = profile.day_profile(drawn, day)
+    annual = profile.annual_envelope(drawn, day) if envelope in ("annual", "both") else None
+    fig = figures.profile_figure(p, annual, envelope, store.get("x_range"), depth_max,
                                  revision=str(store.get("logger")))
-    marker = Patch()
-    marker["layout"]["shapes"] = [figures.day_marker(p["day"])]
-    return fig, profile_label(p, annual, store), marker
+    marker = Patch()    # the day, and the logger change lines (All loggers) kept
+    marker["layout"]["shapes"] = [figures.day_marker(p["day"])] + figures.change_shapes(store.get("changes"))
+    return fig, profile_label(p, annual, store, station), marker
 
 
 # ---- registration -----------------------------------------------------------------------------
@@ -393,8 +570,7 @@ def register(app, client: api_client.Client):
         if mast is None:
             return [], None
         default = api_client.default_logger(mast)
-        options = [{"label": lg["label"], "value": lg["value"]} for lg in mast["loggers"]]
-        return options, default["value"] if default else None
+        return logger_options(mast), default["value"] if default else None
 
     @app.callback(
         Output("period", "min_date_allowed"),
@@ -406,10 +582,10 @@ def register(app, client: api_client.Client):
         State("masts", "data"),
     )
     def set_period(logger_value, masts):
-        lg = find_logger(masts, logger_value)
-        if lg is None or not lg.get("last"):
+        period = logger_period(masts, logger_value)
+        if period is None:
             return None, None, None, None, None
-        first, last = (lg.get("first") or lg["last"])[:10], lg["last"][:10]
+        first, last = period
         return first, last, first, last, last
 
     @app.callback(
@@ -422,10 +598,11 @@ def register(app, client: api_client.Client):
         Input("period", "start_date"),
         Input("period", "end_date"),
         Input("resolution", "value"),
+        State("masts", "data"),
     )
-    def load_data(logger_value, start, end, resolution):
+    def load_data(logger_value, start, end, resolution, masts):
         try:
-            r = load(client, logger_value, start, end, resolution)
+            r = load(client, logger_value, start, end, resolution, masts)
         except api_client.ApiError as e:        # the client logged it
             return figures.empty_figure(""), None, _alert(str(e), "danger"), None, None
         except Exception:   # a bug or an unexpected payload: message, log, page stays usable

@@ -98,12 +98,14 @@ class PageTestCase(ApiTestCase):
         return self.call([("masts", "data"), ("mast", "options"), ("mast", "value"),
                           ("masts-message", "children")], [("url", "pathname", v2.URL_PREFIX)])
 
-    def load_all(self, logger, start, end, resolution="daily"):
-        """load_data: (figure, info children, message children, view, profile store)."""
+    def load_all(self, logger, start, end, resolution="daily", masts=None):
+        """load_data: (figure, info children, message children, view, profile store).
+        ``masts``: the catalogue store (needed for All loggers only)."""
         r = self.call([("data-graph", "figure"), ("info", "children"), ("message", "children"),
                        ("view", "data"), ("profile", "data")],
                       [("logger", "value", logger), ("period", "start_date", start),
-                       ("period", "end_date", end), ("resolution", "value", resolution)])
+                       ("period", "end_date", end), ("resolution", "value", resolution)],
+                      state=[("masts", "data", masts)])
         return (r["data-graph"]["figure"], r["info"]["children"], r["message"]["children"],
                 r["view"]["data"], r["profile"]["data"])
 
@@ -226,7 +228,8 @@ class SelectorTest(PageTestCase):
                           state=[("masts", "data", masts)])
             return [o["value"] for o in r["logger"]["options"]], r["logger"]["value"]
         options, value = loggers("Mast 6")
-        self.assertEqual(sorted(options), sorted([TEKBOX_M6, CAMPBELL_M6]))
+        self.assertEqual(sorted(options[:-1]), sorted([TEKBOX_M6, CAMPBELL_M6]))
+        self.assertEqual(options[-1], "all:Mast 6")          # All loggers (T11), last
         self.assertEqual(value, CAMPBELL_M6)
         self.assertEqual(loggers("Mast 13"), ([CAMPBELL_M13], CAMPBELL_M13))
 

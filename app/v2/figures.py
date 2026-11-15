@@ -8,6 +8,7 @@ is made here.
     empty_figure(message)              -> a placeholder with a message
     profile_figure(day, annual, ...)   -> the ground temperature profile of one day (T10)
     day_marker(day)                    -> a shape marking that day on the data figure
+    change_shapes(changes)             -> dashed lines at the logger changes (T11)
 
 Rows, top to bottom, each left out without data: ground temperature (one line per depth,
 taller), air temperature, relative humidity, barometric pressure (kPa), one row per
@@ -20,6 +21,15 @@ the upper). Full (``mode="raw"``): one line per series, thinned by rawseries.thi
 about MAX_POINTS points, with ``meta`` = the API column key, so that a zoom can replace the
 data trace by trace (callbacks.py). Lines break at gaps (daily: a missing day; raw: as
 rawseries).
+
+All loggers (T11): the series come from join.join (one series per depth or series name and
+station, spanning the loggers). A joined series' line breaks at every logger change (its
+``breaks``), and a raw series is thinned per logger segment over the same window (same bin
+width). Inclination rows are then one per series name. With several stations (Mast 9) each
+row's traces are grouped by station (legend groups titled with the station identifier, the
+ground temperature colours per depth within a station, the second station's lines dotted).
+The logger changes are dashed vertical lines (``change_shapes``, layout shapes) with the
+logger's name above the figure (annotations).
 """
 from __future__ import annotations
 
@@ -31,7 +41,7 @@ import plotly.graph_objects as go
 from plotly.colors import hex_to_rgb, sample_colorscale, unlabel_rgb
 from plotly.subplots import make_subplots
 
-from . import api_client, rawseries, texts
+from . import api_client, join, rawseries, texts
 
 FONT = ("system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, "
         "'Noto Sans', 'Liberation Sans', sans-serif")
@@ -85,15 +95,32 @@ def rows(series: dict) -> list:
         if items:
             out.append(Row(key, title, items[0].unit, items, tall))
 
-    add("ground", texts.ROW_GROUND, api_client.ground_temperature(series), tall=True)
-    add("air", texts.ROW_AIR, api_client.weather(series, "AirTemp"))
-    add("humidity", texts.ROW_HUMIDITY, api_client.weather(series, "RelHum"))
-    add("pressure", texts.ROW_PRESSURE, api_client.weather(series, "BarometricPressure"))
-    for sel in api_client.inclination(series):
-        add(f"inclination:{sel.key}", texts.ROW_INCLINATION.format(name=sel.label), [sel])
-    add("heading", texts.ROW_HEADING, api_client.heading(series))
-    add("sensor_temperature", texts.ROW_SENSOR_TEMPERATURE, api_client.sensor_temperature(series))
-    add("battery", texts.ROW_BATTERY, api_client.battery(series))
+    stations = []       # joined series: the stations in order of appearance
+    for s in series.values():
+        st = join.station(s)
+        if st is not None and st not in stations:
+            stations.append(st)
+
+    def by_station(items):      # several stations: a station's items together, stable
+        if len(stations) < 2:
+            return items
+        return sorted(items, key=lambda sel: stations.index(join.station(sel)))
+
+    add("ground", texts.ROW_GROUND, by_station(api_client.ground_temperature(series)), tall=True)
+    add("air", texts.ROW_AIR, by_station(api_client.weather(series, "AirTemp")))
+    add("humidity", texts.ROW_HUMIDITY, by_station(api_client.weather(series, "RelHum")))
+    add("pressure", texts.ROW_PRESSURE, by_station(api_client.weather(series, "BarometricPressure")))
+    angles = api_client.inclination(series)
+    if stations:        # joined: one row per series name (each station's series in it)
+        for name in dict.fromkeys(sel.label for sel in angles):
+            add(f"inclination:{name}", texts.ROW_INCLINATION.format(name=name),
+                by_station([sel for sel in angles if sel.label == name]))
+    else:
+        for sel in angles:
+            add(f"inclination:{sel.key}", texts.ROW_INCLINATION.format(name=sel.label), [sel])
+    add("heading", texts.ROW_HEADING, by_station(api_client.heading(series)))
+    add("sensor_temperature", texts.ROW_SENSOR_TEMPERATURE, by_station(api_client.sensor_temperature(series)))
+    add("battery", texts.ROW_BATTERY, by_station(api_client.battery(series)))
     return out
 
 
@@ -134,8 +161,18 @@ def _rgba(color: str, alpha: float) -> str:
 
 
 def row_colors(row: Row) -> list:
+    """Ground temperature: by depth rank (within each station of joined series, so a depth
+    has the same colour at both stations); other rows: the palette in order."""
     if row.key == "ground":
-        return depth_colors(len(row.items))
+        stations = list(dict.fromkeys(join.station(sel) for sel in row.items))
+        if len(stations) < 2:
+            return depth_colors(len(row.items))
+        out = [None] * len(row.items)
+        for st in stations:
+            idx = [i for i, sel in enumerate(row.items) if join.station(sel) == st]
+            for i, color in zip(idx, depth_colors(len(idx))):
+                out[i] = color
+        return out
     return [PALETTE[i % len(PALETTE)] for i in range(len(row.items))]
 
 
@@ -147,17 +184,36 @@ def _values(v) -> list:
     return [None if x != x else x for x in out]
 
 
-def daily_trace_data(s) -> dict:
-    """x (days), mean, min, max of a DailySeries, with a break (None) at every missing day."""
-    t = s.time.astype("datetime64[D]")
-    arrays = [s.mean, s.min, s.max]
+def _daily_segment(t, arrays):
+    t = t.astype("datetime64[D]")
+    arrays = [np.asarray(a, dtype=float) for a in arrays]
     if len(t) > 1:
         idx = np.where(np.diff(t) > np.timedelta64(1, "D"))[0] + 1
         if len(idx):
             t = np.insert(t, idx, t[idx - 1] + np.timedelta64(1, "D"))
-            arrays = [np.insert(np.asarray(a, dtype=float), idx, np.nan) for a in arrays]
+            arrays = [np.insert(a, idx, np.nan) for a in arrays]
+    return t, arrays
+
+
+def daily_trace_data(s) -> dict:
+    """x (days), mean, min, max of a DailySeries, with a break (None) at every missing day
+    and at every logger change of a joined series (a None point at the next logger's first
+    day)."""
+    ts, cols = [], [[], [], []]
+    for i, (a, b) in enumerate(join.segments(s)):
+        t, arrays = _daily_segment(s.time[a:b], [s.mean[a:b], s.min[a:b], s.max[a:b]])
+        if i:
+            t = np.insert(t, 0, t[0])
+            arrays = [np.insert(x, 0, np.nan) for x in arrays]
+        ts.append(t)
+        for c, x in zip(cols, arrays):
+            c.append(x)
+    if not ts:
+        return {"x": [], "mean": [], "min": [], "max": []}
+    t = np.concatenate(ts)
+    mean, lo, hi = (np.concatenate(c) for c in cols)
     return {"x": np.datetime_as_string(t, unit="D").tolist(),
-            "mean": _values(arrays[0]), "min": _values(arrays[1]), "max": _values(arrays[2])}
+            "mean": _values(mean), "min": _values(lo), "max": _values(hi)}
 
 
 def raw_mode(n_points: int) -> str:
@@ -167,11 +223,23 @@ def raw_mode(n_points: int) -> str:
 def raw_trace_data(sel, lo, hi, max_points: int | None = None) -> dict:
     """x, y and mode of one Full trace: the raw series of ``sel`` in [lo, hi], thinned to
     about ``max_points`` points (MAX_POINTS), plus ``bin_seconds`` (None: not thinned)."""
-    t, v, _thinned, bin_s = rawseries.thin_series(sel.series.time, sel.series.value, lo, hi,
-                                                  max_points or MAX_POINTS)
-    y = _values(v)
-    return {"x": np.datetime_as_string(t, unit="s").tolist(), "y": y,
-            "mode": raw_mode(sum(1 for x in y if x is not None)), "bin_seconds": bin_s}
+    s = sel.series
+    xs, ys, bins = [], [], []
+    for a, b in join.segments(s):       # a joined series: each logger's segment on its own
+        t, v, _thinned, bin_s = rawseries.thin_series(s.time[a:b], s.value[a:b], lo, hi,
+                                                      max_points or MAX_POINTS)
+        if bin_s is not None:
+            bins.append(bin_s)
+        if not len(t):
+            continue
+        x = np.datetime_as_string(t, unit="s").tolist()
+        if xs:                          # a break at the logger change
+            xs.append(x[0])
+            ys.append(None)
+        xs.extend(x)
+        ys.extend(_values(v))
+    return {"x": xs, "y": ys, "mode": raw_mode(sum(1 for y in ys if y is not None)),
+            "bin_seconds": max(bins) if bins else None}
 
 
 # ---- the figure -------------------------------------------------------------------------------
@@ -180,8 +248,10 @@ def _axis_suffix(r: int) -> str:
     return "" if r == 1 else str(r)
 
 
-def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=None):
-    """(figure, trace keys, bin seconds) of the rows. ``mode`` "daily" (DailySeries) or
+def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=None, changes=None):
+    """(figure, trace keys, bin seconds) of the rows. ``changes``: the logger changes of
+    joined series (join.Joined.changes), drawn as dashed lines with the logger's name.
+    ``mode`` "daily" (DailySeries) or
     "raw" (RawSeries, thinned to ``window`` (lo, hi) datetimes). Trace keys: the API column key
     of every trace in figure order (None for the band traces), for the zoom's Patch.
     ``revision`` is the figure's uirevision (a new value resets the user's zoom). Bin
@@ -196,13 +266,26 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
                         subplot_titles=[r.title for r in rows_])
     keys, bins = [], []
     raw = mode == "raw"
+    stations = list(dict.fromkeys(join.station(sel) for row in rows_ for sel in row.items))
+    by_station = len(stations) > 1      # joined series of several stations (Mast 9)
     for r, row in enumerate(rows_, start=1):
         legend = f"legend{_axis_suffix(r)}"
         unit = unit_text(row.unit)
-        many = len(row.items) > 1
+        many = len(row.items) > 1 or by_station
+        titled = set()
         for sel, color in zip(row.items, row_colors(row)):
             group = f"{row.key}|{sel.key}"
             common = dict(name=sel.label, legend=legend, legendgroup=group, showlegend=many)
+            name, dash = sel.label, "solid"
+            if by_station:      # a legend group per station in each row, titled with it
+                st = join.station(sel)
+                group = f"{row.key}|{st}"
+                common["legendgroup"] = group
+                if group not in titled:
+                    titled.add(group)
+                    common["legendgrouptitle"] = dict(text=st, font=dict(size=12, color=MUTED))
+                name = texts.TRACE_STATION.format(name=sel.label, station=st)
+                dash = "solid" if stations.index(st) == 0 else "dot"
             hover_unit = unit_text(sel.unit)
             if raw:
                 d = raw_trace_data(sel, *window, max_points=max_points)
@@ -210,8 +293,8 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
                     bins.append(d["bin_seconds"])
                 fig.add_trace(go.Scatter(
                     x=d["x"], y=d["y"], mode=d["mode"], meta=sel.key, connectgaps=False,
-                    line=dict(color=color, width=1.4), marker=dict(color=color, size=4),
-                    hovertemplate=texts.HOVER_RAW.format(name=sel.label, unit=hover_unit),
+                    line=dict(color=color, width=1.4, dash=dash), marker=dict(color=color, size=4),
+                    hovertemplate=texts.HOVER_RAW.format(name=name, unit=hover_unit),
                     **common), row=r, col=1)
                 keys.append(sel.key)
                 continue
@@ -223,14 +306,16 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
                                      **band), row=r, col=1)
             fig.add_trace(go.Scatter(
                 x=d["x"], y=d["mean"], customdata=list(zip(d["min"], d["max"])), mode="lines",
-                connectgaps=False, line=dict(color=color, width=1.5),
-                hovertemplate=texts.HOVER_DAILY.format(name=sel.label, unit=hover_unit),
+                connectgaps=False, line=dict(color=color, width=1.5, dash=dash),
+                hovertemplate=texts.HOVER_DAILY.format(name=name, unit=hover_unit),
                 **common), row=r, col=1)
             keys.extend([None, None, sel.key])
         fig.update_yaxes(title=dict(text=unit, standoff=6), row=r, col=1)
     height = plot_px + MARGIN["t"] + MARGIN["b"]
     fig.update_layout(**_base_layout(height), margin=MARGIN, hovermode="x unified",
                       uirevision=revision)
+    if changes:
+        fig.update_layout(shapes=change_shapes(changes))
     axis = dict(showgrid=True, gridcolor=GRID, showline=True, linecolor=AXIS, ticks="outside",
                 tickcolor=AXIS, zeroline=False)
     fig.update_xaxes(type="date", **axis)
@@ -244,7 +329,26 @@ def data_figure(rows_: list, mode: str, revision: str, window=None, max_points=N
             bgcolor="rgba(255,255,255,0)", itemclick="toggle", itemdoubleclick="toggleothers")})
     for a in fig.layout.annotations:        # the row titles, left-aligned above each row
         a.update(x=0, xanchor="left", font=dict(size=13, color=MUTED))
+    for c in changes or []:                 # the logger names, above the top row
+        fig.add_annotation(x=_change_x(c), xref="x", y=1, yref="paper", yanchor="bottom",
+                           xanchor="left", text=texts.CHANGE_LABEL.format(logger=c["label"]),
+                           showarrow=False, font=dict(size=11, color=CHANGE_COLOR),
+                           name="logger-change")
     return fig, keys, (max(bins) if bins else None)
+
+
+CHANGE_COLOR = "#495057"
+
+
+def _change_x(change) -> str:
+    return change["time"].replace("T", " ")
+
+
+def change_shapes(changes) -> list:
+    """Dashed vertical lines over all rows at the logger changes (join.Joined.changes)."""
+    return [dict(type="line", xref="x", yref="paper", x0=_change_x(c), x1=_change_x(c), y0=0, y1=1,
+                 line=dict(color=CHANGE_COLOR, width=1.2, dash="dash"), name="logger-change")
+            for c in changes or []]
 
 
 def _plotly_time(t) -> str:

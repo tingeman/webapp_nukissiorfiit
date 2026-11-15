@@ -8,7 +8,8 @@ Component ids (used by callbacks.py and the tests):
     url              page location; its first render loads the mast catalogue
     masts            dcc.Store: the catalogue (api_client.Client.masts())
     masts-message    problem with the mast list
-    mast, logger     dropdowns (logger default: the one with the latest data)
+    mast, logger     dropdowns (logger default: the one with the latest data; "All loggers",
+                     value "all:<mast>", is the last option of a mast with 2 or more)
     period           DatePickerRange: limits and default = the logger's first..last day;
                      not persisted (the logger callback sets it on every load)
     resolution       "daily" (default) / "full"; persisted per browser session
@@ -26,8 +27,7 @@ Component ids (used by callbacks.py and the tests):
     profile-label    the chosen day and the annual envelope's window
     profile-graph    temperature against depth of the chosen day
 
-Room for the next tasks: "All loggers" (T11) is an option of the logger dropdown, and the
-download (T12) a card of its own after the profile.
+Room for the next task: the download (T12), a card of its own after the profile.
 """
 import dash_bootstrap_components as dbc
 from dash import dcc, html

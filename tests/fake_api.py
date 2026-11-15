@@ -53,6 +53,12 @@ Test controls (in-process only):
   server.force      None, or (status, body): every API request is answered with that
                     status and body (a dict is sent as JSON, bytes as they are; gzip
                     applies to the v2 measurement paths as usual)
+  server.force_if   None, or (match, (status, body)): as force, but only for requests whose
+                    query contains all of the {param: value} items of match (e.g. one
+                    logger); a "path" item matches the end of the path instead
+  server.delay      seconds every API request waits before it is answered (default 0), so
+                    that overlapping requests can be seen
+  server.max_in_flight  the most requests that were being answered at the same time
   server.fixtures   the loaded fixtures ("metadata", "measurements" (v2: {timeseries id:
                     [(datetime, time string, value), ...]})); a test may replace parts
                     of it
@@ -64,6 +70,8 @@ command line, each request is logged to stdout as "REQ <path>?<query>".
 import gzip
 import json
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -462,6 +470,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
+        srv = self.server
+        with srv.lock:
+            srv.in_flight += 1
+            srv.max_in_flight = max(srv.max_in_flight, srv.in_flight)
+        try:
+            self._get()
+        finally:
+            with srv.lock:
+                srv.in_flight -= 1
+
+    def _get(self):
         url = urlparse(self.path)
         params = dict(parse_qsl(url.query, keep_blank_values=True))
         srv = self.server
@@ -475,6 +494,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         _suffix, handler, may_gzip = route
         compress = may_gzip and accepts_gzip(self.headers.get("Accept-Encoding"))
+        if srv.delay:
+            time.sleep(srv.delay)
+        if srv.force_if is not None and all(url.path.endswith(v) if k == "path" else params.get(k) == v
+                                            for k, v in srv.force_if[0].items()):
+            self._send(*srv.force_if[1], compress=compress)
+            return
         if srv.force is not None:
             self._send(*srv.force, compress=compress)
             return
@@ -500,6 +525,11 @@ def make_server(fixtures_dir, port=0, host="127.0.0.1", verbose=False):
     server.requests = []
     server.headers = []
     server.force = None
+    server.force_if = None
+    server.delay = 0.0
+    server.lock = threading.Lock()
+    server.in_flight = 0
+    server.max_in_flight = 0
     server.verbose = verbose
     return server
 

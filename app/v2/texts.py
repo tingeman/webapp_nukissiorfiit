@@ -22,6 +22,8 @@ MAST = "Mast"
 MAST_PLACEHOLDER = "Choose a mast"
 LOGGER = "Logger"
 LOGGER_PLACEHOLDER = "Choose a logger"
+# the last option of the logger dropdown when the mast has 2 or more loggers (T11)
+LOGGER_ALL = "All loggers"
 PERIOD = "Period"
 RESOLUTION = "Values"
 RES_DAILY = "Daily"
@@ -36,6 +38,7 @@ CHOOSE_FIRST = "Choose a mast and a logger."
 CHOOSE_PERIOD = "Choose a start and an end date."
 PERIOD_REVERSED = "The start date is after the end date."
 NO_DATA = "No data for this logger between {start} and {end}."
+NO_DATA_ALL = "No data for any logger of this mast between {start} and {end}."
 UNEXPECTED = "Something went wrong while preparing the plots. Please try again."
 
 # ---- info line ------------------------------------------------------------------------------
@@ -56,6 +59,10 @@ INFO_REQUEST_LINE = "{start} to {end}: {seconds:.2f} s, {size}"
 INFO_REQUEST_KIND = "{kind}: "
 INFO_KIND_RAW = "raw"
 INFO_KIND_PROFILE = "daily, for the profile"
+# All loggers: the loggers fetched ({loggers}: their names, joined by "; "), and each
+# request line starts with its logger's name ("{kind}" above is then "<logger>, <kind>")
+INFO_LOGGERS = "Loggers: {loggers}"
+INFO_NO_LOGGER = "no logger has data in this period"
 
 # ---- figure ---------------------------------------------------------------------------------
 FIGURE_EMPTY = "Choose a mast and a logger to see its data."
@@ -70,6 +77,10 @@ ROW_BATTERY = "Battery voltage"
 # {name} the series label, {unit} its unit (may be empty)
 HOVER_DAILY = ("%{{x|%Y-%m-%d}}<br>mean %{{y:.3f}} {unit}<br>"
                "min %{{customdata[0]:.3f}} · max %{{customdata[1]:.3f}}<extra>{name}</extra>")
+# All loggers with several stations (Mast 9): a trace's hover name ({name} the series label)
+TRACE_STATION = "{name} ({station})"
+# the label at a logger change (dashed line): {logger} the logger's name
+CHANGE_LABEL = "{logger}"
 HOVER_RAW = "%{{x|%Y-%m-%d %H:%M:%S}} UTC<br>%{{y:.3f}} {unit}<extra>{name}</extra>"
 
 # ---- ground temperature profile (T10) ------------------------------------------------------
@@ -91,6 +102,8 @@ PROFILE_LABEL = "Daily mean of {day}"
 PROFILE_LABEL_ANNUAL = ("annual envelope from the daily means of {start} to {end} "
                         "({valid} of {days} days with data)")
 PROFILE_LABEL_SHORT = " (the loaded data starts on {start})"
+# All loggers with several stations: the station the profile is from
+PROFILE_LABEL_STATION = ", station {station}"
 PROFILE_MEAN = "Daily mean"
 PROFILE_DAY_BAND = "Day min/max"
 PROFILE_ANNUAL_MAX = "Annual max"
