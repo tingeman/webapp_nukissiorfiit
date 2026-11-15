@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check against the local backend, then T6 (release). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8 done; next T9 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check against the local backend, then T6 (release). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8, T9 done; next T10 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 
@@ -13,15 +13,20 @@ Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check ag
 - T3 2026-11-15: page on v2: mast and logger dropdowns from the metadata, range follows the logger (date picker persistence removed: the logger callback sets the range at every load), one `/raw` request set per update, inclination by datatype, pressure in kPa, battery legend "Battery level" (was "B"); v1 data access, stub route and fixture removed; `influx_test`/`influxdb_client` imports dropped from app.py (unused); suite 103 passed (`48ed122`)
 - T7 2026-11-15 (branch `agent-api-v2-phase2`): skeleton page at `/app/nuki/v2/`, a second Dash app on the same Flask server (`app/v2/`), links both ways, the classic data callback moved from the global `@callback` to `@app.callback` (Dash puts global callbacks into whichever app sets up first); suite 109 passed (`fd42b1d`)
 - T8 2026-11-15: `app/v2/api_client.py` (Client, ApiError, daily/raw sharing `_fetch` with max_parallel and a deadline, daily chunks at 1 August, catalogue and caches, selections incl. heading/sensor temp, kPa), rawseries/trumpet ported, stub `/daily`, env template lists the two new variables; suite 169 passed (`61298b4`)
+- T9 2026-11-15: v2 page: selectors from the catalogue, period from the logger, Daily with min/max bands, Full (one year up to the end date, one raw request, thinned, refetch on zoom by Patch), one `make_subplots` figure, info line, Bootstrap bundled (sha256 as TSP, `-text` in `.gitattributes`); suite 196 passed (`2a12010`)
 - T4 2026-11-15: env template, README and cross-repo TODOs (`00a2f98`)
 
 ## Open questions
+
+- Full limit: implemented as "one year up to the end date" (365 or 366 days) instead of "366 days", so Full is always one raw request (a 366-day window over a non-leap year was 2 requests). Agent decision 2026-11-15, within the plan's intent; say if you want 366 days back.
+- The v2 page has not been looked at by eye yet (tests only); see USER_STEPS step 4.
 
 - monitoring_db: a site/group field for masts, and the inclinometer mounting orientation (plan, "Notes on the sensor definitions").
 
 ## Notes for the next session
 
 - T8 choices: `API_TIMEOUT` has no seconds field (also used for 504); daily series keep only days with count > 0; `Selected.unit` holds the converted unit (details keep the API's); an empty selection returns `[]`; an invalid logger value raises `ValueError`; metadata caches are per `Client` instance, so T9 creates one client per process at import.
+- T9 choices: default mast = first in catalogue order (Mast 6); a range change reloads at once (no Load button, `updatemode="bothdates"`); the classic page has no assets folder, so it loads no v2 CSS (tested); `test_pages.test_callbacks_apart` now checks callback modules, since both pages have a `logger.options/value` output.
 
 - Phase 2 runs side by side with phase 1: a second Dash app at `/app/nuki/v2/` with links both ways, switch-over T15 (decided 2026-11-15). Phase 1 is released on its own when ready (T6). Phase 2 development (T7+) may start before T6 is deployed. Phase 2 is a free redesign; only the phase 1 page must stay available and unchanged.
 - Sequencing: T2 adds the v2 functions alongside the v1 ones (app.py still uses v1); T3 switches the page and deletes the v1 functions, the v1 stub route and `tests/fixtures/measurements_v1.json`.
