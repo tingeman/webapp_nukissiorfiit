@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released as 2026.2 (`655aa0a`, deploy by you). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; next: your review of `/app/nuki/v2/` (USER_STEPS step 4), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released and deployed as 2026.2 (`655aa0a`) 2026-11-15; open: production checks, `main` fast-forward, nginx deploy (USER_STEPS steps 2c, 3). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; next: your review of `/app/nuki/v2/` (USER_STEPS step 4), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 
@@ -21,7 +21,7 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6
 - Browser check 2026-11-15 (agent, image against the stub): page renders; fixed the profile graph overlapping the download card (graph created hidden kept height 0) and the wrapped slider tooltip; envelope, Full, All loggers and download not clicked through (screenshots timed out)
 - T12 2026-11-15: Excel download (`app/v2/download.py`, openpyxl 3.1.5 + et-xmlfile 2.0.0 locked): own year and logger selectors ("All" as a separate checklist), Info + full/daily sheets per logger, loggers in sequence with one deadline, button disabled while running (`running=`); `develop/main` (Dockerfile fix) merged in (`523b3a1`); suite 273 passed (`b23852a`)
 - T11 2026-11-15: All loggers (`app/v2/join.py`): join within one station by series, datatype, unit (and depth), each logger fetched for its own part of the range, one logger at a time, dashed change markers, Mast 9 stations in separate legend groups, profile per day from one station; suite 247 passed (`ed5a14e`)
-- T6 2026-11-15 (you): tag 2026.2 on `develop/main` (`655aa0a`), built and tested with build_image.sh (tarball e8c35fb0...), releases.yml updated
+- T6 2026-11-15 (you): tag 2026.2 on `develop/main` (`655aa0a`), built and tested with build_image.sh (tarball e8c35fb0...), pinned (dtu_sus_web_server `da715d5`) and deployed; nginx 120 s merged there (`a603fbe`), not yet deployed. Host steps: dtu_sus_web_server `docs/plan/USER_STEPS_api-v2.md`
 - Dockerfile fix 2026-11-15: unused `ENV DASH_DEBUG_MODE` (legacy syntax warning) removed on `agent-fixes` (`5359623`, suite 103 passed); `develop/main` fast-forwarded to it with your permission (not pushed)
 - T4 2026-11-15: env template, README and cross-repo TODOs (`00a2f98`)
 
@@ -35,6 +35,8 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6
 - monitoring_db: a site/group field for masts, and the inclinometer mounting orientation (plan, "Notes on the sensor definitions").
 
 ## Notes for the next session
+
+- Keep `BACKEND_API_BASE_URL` in the `/api/v1` form: dtu_sus_web_server's nuki playbook post-check requests `<BACKEND_API_BASE_URL>/metadata` and would fail with the root form. Its `InfluxDB health` post-check goes with R3.
 
 - T8 choices: `API_TIMEOUT` has no seconds field (also used for 504); daily series keep only days with count > 0; `Selected.unit` holds the converted unit (details keep the API's); an empty selection returns `[]`; an invalid logger value raises `ValueError`; metadata caches are per `Client` instance, so T9 creates one client per process at import.
 - T11 choices: a logger is asked only for its catalogue period within the range (the newest minutes may lag by the 10-min cache); a zoom into the gap between loggers makes no request; chunks of one logger may still run 2 at a time; on a day both loggers recorded, the profile takes the later logger.

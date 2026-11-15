@@ -2,9 +2,9 @@
 
 Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Status: [STATUS_api-v2.md](STATUS_api-v2.md).
 
-Steps only you can do, in order. Each says whether you can do it **while the agent works** on phase 2 (T8-T13, branch `agent-api-v2-phase2`, in this checkout) or must **wait**.
+Steps only you can do, in order. Host-side steps (deploys, nginx, `main` of dtu_sus_web_server) are in dtu_sus_web_server `docs/plan/USER_STEPS_api-v2.md`.
 
-The agent works in this checkout (`C:\thin\02_Code\python_web_apps\webapp_nukissiorfiit`), switches nothing but `agent-api-v2-phase2`, builds `webapp_nuki:local` and runs `tests/run.sh` (containers with `--network none`, no ports). It does not use compose, port 8050 or the project name `nuki`.
+**State 2026-11-15:** phase 1 released and deployed (`webapp_nuki 2026.2`). Phase 2 code is done (T8-T13 on `agent-api-v2-phase2`); no agent is working, so nothing here has to wait for one. Open: step 2c.4-5 (checks, `main`), step 3 (nginx), step 4 (review).
 
 ## 1. T5: check phase 1 against the local backend (DONE 2026-11-15, results in STATUS)
 
@@ -36,9 +36,7 @@ docker compose --project-name nuki -f compose.develop.yml -f compose.develop.loc
 cd .. && git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phase1   # --force: secrets/ is untracked
 ```
 
-## 2. T6: release phase 1 (can run in parallel, after step 1)
-
-Independent of the phase 2 work (other branch; the release builds from GitHub, not from this checkout).
+## 2. T6: release phase 1 (DONE 2026-11-15 except c.5: `2026.2`, deployed)
 
 The "Backend not reachable" fix (`655aa0a`) is already on `agent-api-v2`, so it ships with this release; nothing extra to do. The release is built from GitHub, so everything must be pushed first.
 
@@ -68,26 +66,37 @@ It clones the tag, runs `tests/run.sh` (103 tests) and writes the bundle to dtu_
 1. Publish the bundle files to the releases share (`...\SUS-PArcWeb01\releases\webapp_nuki\`).
 2. In `ansible/vars/releases.yml`, `webapp_nuki`: `version` and `tarball_sha256` from the manifest in `release-out/webapp_nuki/`, and update the comment. Commit.
 3. From `ansible/`: `ansible-playbook -kK -i hosts playbook_install_webapp_nuki.yml -v --ask-vault-pass`.
-4. Check `https://arctic.sustain.dtu.dk/app/nuki/`: masts, loggers, a Campbell and a Tekbox logger.
-5. Fast-forward `main` to the deployed tag (in this repository; the check makes sure it is a fast-forward): `git merge-base --is-ancestor main 2026.2 && git branch -f main '2026.2^{commit}' && git push origin main develop/main`. `develop/main` is one commit ahead of the tag (the Dockerfile fix `5359623`, not in 2026.2 and not needed there); push it too.
+4. Check `https://arctic.sustain.dtu.dk/app/nuki/`: masts, loggers, a Campbell and a Tekbox logger (commands in dtu_sus_web_server `USER_STEPS_api-v2.md`, step 3). **Open.**
+5. **Open:** fast-forward `main` to the deployed tag (in this repository; the check makes sure it is a fast-forward): `git merge-base --is-ancestor main 2026.2 && git branch -f main '2026.2^{commit}' && git push origin main develop/main`. `develop/main` is one commit ahead of the tag (the Dockerfile fix `5359623`, not in 2026.2 and not needed there); push it too.
 
-No env change is needed: the `/api/v1` form of `BACKEND_API_BASE_URL` keeps working (one WARNING at start), and the new variables have defaults. Optional, at the next edit of the production env file: the root form `http://<data02-host>/mdb`.
+No env change is needed: the `/api/v1` form of `BACKEND_API_BASE_URL` keeps working (one WARNING at start), and the new variables have defaults. **Keep the `/api/v1` form**: the nuki playbook's post-check requests `<BACKEND_API_BASE_URL>/metadata`, which fails with the root form (see dtu_sus_web_server `USER_STEPS_api-v2.md`, Notes).
 
-## 3. nginx timeout 120 s (can run in parallel; needed before step 5)
+After step c, the phase 1 worktree can go (stop your dev app first):
 
-dtu_sus_web_server branch `agent-fixes` (`396cc0a`): `proxy_read_timeout 120s` for `/app/nuki/`.
+```bash
+cd /c/thin/02_Code/python_web_apps/webapp_nuki_phase1
+docker compose --project-name nuki -f compose.develop.yml -f compose.develop.local.yml down
+cd .. && git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phase1   # --force: secrets/ is untracked
+```
 
-1. Merge `agent-fixes` into its `develop/main`.
-2. Deploy nginx (`playbook_install_nginx.yml`).
-3. `curl -sI https://arctic.sustain.dtu.dk/app/nuki/` still answers 200.
+## 3. nginx timeout 120 s (needed before step 5)
 
-## 4. Review phase 2 (wait for the agent)
+`proxy_read_timeout 120s` for `/app/nuki/` is merged in dtu_sus_web_server (`a603fbe`) but not live: the nuki playbook does not reload nginx. Deploy it with `playbook_install_nginx.yml`: dtu_sus_web_server `USER_STEPS_api-v2.md`, steps 6-7. **Open.**
 
-When the agent stops, it reports which of T8-T13 are done (STATUS, **Now**). Review the commits on `agent-api-v2-phase2`. Look at the page locally the same way as step 1, but from this checkout once the agent has finished (or from a worktree of `agent-api-v2-phase2`): `http://localhost:8050/app/nuki/v2/`. Check Daily/Full, a zoom in Full, the profile slider, All loggers on Mast 9 and Mast 6, and an Excel download of Mast 6 (All, all years). Note load times.
+## 4. Review phase 2 (now)
 
-## 5. T14: release phase 2 (wait for the agent and your review; after step 3)
+Review the commits on `agent-api-v2-phase2` (`git log --oneline develop/main..agent-api-v2-phase2`) and the open questions in STATUS. Look at the page against your local backend from this checkout (it is on `agent-api-v2-phase2`; stop the phase 1 dev app first, both use project `nuki` and port 8050):
 
-As step 2, with `agent-api-v2-phase2` merged into `develop/main` (your permission). Then on the server: `/app/nuki/v2/` Daily load times, a Full zoom, an All-loggers download for Mast 6, and the API log request counts (plan, "Effect on the API, per action").
+```bash
+cd /c/thin/02_Code/python_web_apps/webapp_nukissiorfiit
+docker compose --project-name nuki -f compose.develop.yml -f compose.develop.local.yml up -d --build webapp_nuki
+```
+
+Then `http://localhost:8050/app/nuki/v2/`. The agent checked only the default load and the profile by eye. Check: Daily/Full, a zoom in Full, the profile slider and the three envelopes, All loggers on Mast 6 and Mast 9, an Excel download of Mast 6 (All, all years; open it in Excel), the classic page `/app/nuki/` still unchanged. Note load times and anything that looks wrong; the agent fixes it on the phase 2 branch.
+
+## 5. T14: release phase 2 (after steps 3 and 4)
+
+As step 2, with tag `2026.3`, after `agent-api-v2-phase2` is fast-forwarded into `develop/main` (your permission; it already contains `develop/main`). Host side: dtu_sus_web_server `USER_STEPS_api-v2.md`, step 8. Then on the server: `/app/nuki/v2/` Daily load times, a Full zoom, an All-loggers download for Mast 6, and the API log request counts (plan, "Effect on the API, per action").
 
 ## 6. T15: switch-over (your decision, later)
 
@@ -95,4 +104,4 @@ Tell the agent when phase 2 should replace phase 1 at `/app/nuki/`.
 
 ## Decisions the agent may ask for
 
-The agent writes open questions into STATUS (**Open questions**) instead of stopping, picks the plan's default, and notes it. Answer them when you review (step 4).
+The agent wrote open questions into STATUS (**Open questions**) instead of stopping, with the default it picked. Answer them in your review (step 4).
