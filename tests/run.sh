@@ -123,7 +123,9 @@ ENV_MOUNT=(-e APP_ENV=production -v "$(hp "$ENV_FILE"):/app/secrets/.env.product
 SRC_MOUNT=() SRC_WRAP=()
 if [ -n "$APP_SRC" ]; then
   SRC_MOUNT=(-v "$(hp "$APP_SRC"):/appsrc:ro")
-  SRC_WRAP=(sh -c 'cp -R /appsrc/. /app/ && exec "$@"' sh)
+  # secrets/ is left out: docker compose creates it in the checkout as a mount point, and
+  # /app/secrets/.env.production is a read-only mount here (the copy would fail on it)
+  SRC_WRAP=(sh -c 'tar -C /appsrc --exclude=./secrets -cf - . | tar -C /app -xf - && exec "$@"' sh)
 fi
 
 # ---- helpers -------------------------------------------------------------------------
