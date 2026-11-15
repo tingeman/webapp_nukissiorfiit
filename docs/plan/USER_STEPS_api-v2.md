@@ -8,6 +8,8 @@ All commands are for **WSL** (bash; Docker Desktop's `docker` works there). Ever
 
 ## Where you are, what to do next (2026-11-15)
 
+**Update 2026-11-15:** A (review) and B (nginx) done, C (build `2026.3`, tests passed) done; D running (deploy started, then web server steps 9 and 10); then E (5.5).
+
 Phase 1 (`2026.2`) is deployed. Phase 2 is tagged: `develop/main` = `agent-api-v2-phase2` = tag `2026.3` = `9a95a5a`, all pushed (steps 5.1, 5.2, done before steps 3 and 4). That is fine: the tag contains all phase 2 code; nothing has to be undone. **Nothing is built or deployed from it yet.** No agent is working; you can start now.
 
 Do these in this order (the boxes below are ticked as you go):
@@ -184,7 +186,7 @@ Expect `tests: passed` in `release-out/webapp_nuki/webapp_nuki-2026.3.manifest.t
 
 ### 5.4 Pin, deploy, check
 
-- [ ] Done
+- [ ] Done (published and pinned 2026-11-15, dtu_sus_web_server `e724abe`; deploy running; then web server steps 9, 10)
 
 dtu_sus_web_server `docs/plan/USER_STEPS_api-v2.md`, steps 8, 9 and 10 (needs its step 6, nginx, first).
 
