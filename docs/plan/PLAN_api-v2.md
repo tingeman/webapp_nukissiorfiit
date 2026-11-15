@@ -59,7 +59,7 @@ Effect on the API, per dashboard update:
 
 | | Today (v1) | Phase 1 (v2) |
 |---|---|---|
-| Metadata | 2 x whole-database `/v1/metadata`, every update | `/v1/metadata` once per 10 min per worker; `/v2/metadata?station=` 1-2 per mast per 10 min per worker |
+| Metadata | 2 x whole-database `/v1/metadata`, every update | `/v1/metadata` once per 10 min per worker; `/v2/metadata?station=` once per included station (6) per 10 min per worker, sequential, when the mast list is built (T2: needed to leave out loggers and masts without data) |
 | Measurements | 3 sequential `/v1/measurements`, whole range each (JSON rows built in Python) | 1 to 3 `/v2/.../raw` chunks of at most 1 year, at most 2 in parallel, columnar, gzip |
 | Worst case in parallel per app worker | 1 | 2 |
 

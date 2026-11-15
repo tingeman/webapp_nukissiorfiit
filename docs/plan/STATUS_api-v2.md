@@ -4,13 +4,17 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Branch: `agent-api-v2`.
 
 ## Now
 
-Plan approved 2026-11-15. T2 (implementer) running. T4 edits are in the working tree, uncommitted: commit after T2 (fix the template's code-default line to the root form). Then T3; T7 (phase 2 skeleton, branch from `agent-api-v2`) may run alongside T3.
+Plan approved 2026-11-15. T3 (implementer) running. Then T7 (phase 2 skeleton at `/app/nuki/v2/`; after T3, because both touch `app/app.py`), then T5 (you).
 
 ## Done
 
 - T1 2026-11-15: stub API v2 (v1/v2 metadata, `/v2/measurements/raw`, gzip), fixture generator `tests/fixtures/make_fixtures.py` (Tekbox + Campbell per mast, Mast 9 on two stations, M13 Tekbox without data, QAA2017-01 and SIS2024-07 to be filtered), 19 stub tests; suite 53 passed (`560adfd`)
+- T2 2026-11-15: db_connector v2 next to the v1 functions: root URL, R1, metadata caches, `mast_catalogue`, chunked `/raw` (chunks counted from the start date, not 1 August), selections, pressure in kPa; suite 105 passed (`7f9b7d0`)
+- T4 2026-11-15: env template, README and cross-repo TODOs (`00a2f98`)
 
 ## Open questions
+
+- T2 request pattern (for you to confirm): building the mast list fetches `/api/v2/metadata?station=` for every included station (6 small sequential requests per worker per 10 min, plus 1 `/v1/metadata`), not only for the selected mast. Alternative: fetch per mast lazily, and the mast list then cannot hide masts without data.
 
 - Phase 2: default mode of the Daily/Full switch, and the threshold (to decide in the phase 2 planning session).
 - monitoring_db: a site/group field for masts, and the inclinometer mounting orientation (plan, "Notes on the sensor definitions").
