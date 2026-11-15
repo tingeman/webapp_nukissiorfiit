@@ -6,7 +6,7 @@ Steps only you can do, in order. Host-side steps (deploys, nginx, `main` of dtu_
 
 All commands are for **WSL** (bash; Docker Desktop's `docker` works there). Every block starts with its `cd`, so it can be pasted from any directory.
 
-**State 2026-11-15:** phase 1 released and deployed (`webapp_nuki 2026.2`). Phase 2 code is done (T8-T13 on `agent-api-v2-phase2`); no agent is working, so nothing here has to wait for one. Open: steps 2.4, 2.5, 3 and 4.
+**State 2026-11-15:** phase 1 released and deployed (`webapp_nuki 2026.2`). Phase 2 code is done (T8-T13, review fixes T16, faster first load T17, on `agent-api-v2-phase2`); no agent is working. **Path to the phase 2 release:** step 3 (nginx) and step 4 (your second look) in any order, then step 5. Steps 2.4 and 2.6 are still open too.
 
 ## 1. T5: check phase 1 against the local backend
 
@@ -105,7 +105,7 @@ git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phase1   # --
 
 ## 4. Review phase 2
 
-- [ ] Done (first look 2026-11-15: findings fixed in T16 `90b95a5`; second look open)
+- [ ] Done (first look 2026-11-15: findings fixed in T16 `90b95a5`; T17 `cfdb573` makes the first load faster; second look open)
 
 Review the commits and the open questions in STATUS:
 
@@ -127,11 +127,58 @@ Then `http://localhost:8050/app/nuki/v2/`. The agent checked only the default lo
 
 If the page hangs (also the classic one): rebuild, the dev image needs the fix `50037ad` (gunicorn `--threads 4`); `up -d --build` above does that.
 
-## 5. T14: release phase 2 (after steps 3 and 4)
+## 5. T14: release phase 2 (`2026.3`, after steps 3 and 4)
+
+### 5.1 Fast-forward `develop/main` to the phase 2 branch
 
 - [ ] Done
 
-As step 2, with tag `2026.3`, after `agent-api-v2-phase2` is fast-forwarded into `develop/main` (your permission; it already contains `develop/main`). Host side: dtu_sus_web_server `USER_STEPS_api-v2.md`, step 8. Then on the server: `/app/nuki/v2/` Daily load times, a Full zoom, an All-loggers download for Mast 6, and the API log request counts (plan, "Effect on the API, per action").
+Tell the agent "fast-forward develop/main to agent-api-v2-phase2" (it then does only that), or do it yourself. The branch already contains `develop/main`, so it is a fast-forward.
+
+```bash
+# WSL, webapp_nukissiorfiit
+cd /mnt/c/thin/02_Code/python_web_apps/webapp_nukissiorfiit
+git fetch . agent-api-v2-phase2:develop/main      # refuses if not a fast-forward
+```
+
+### 5.2 Tag and push
+
+- [ ] Done
+
+```bash
+# WSL, webapp_nukissiorfiit
+cd /mnt/c/thin/02_Code/python_web_apps/webapp_nukissiorfiit
+git tag -a 2026.3 develop/main -m "Phase 2: new page at /app/nuki/v2/ next to the classic page"
+git push origin agent-api-v2-phase2 develop/main 2026.3
+```
+
+### 5.3 Build and test
+
+- [ ] Done
+
+```bash
+# WSL, dtu_sus_web_server
+cd /mnt/c/thin/02_Code/docker_projects/dtu_sus_web_server
+scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git 2026.3
+```
+
+Expect `tests: passed` in `release-out/webapp_nuki/webapp_nuki-2026.3.manifest.txt` (311 tests).
+
+### 5.4 Pin, deploy, check
+
+- [ ] Done
+
+dtu_sus_web_server `docs/plan/USER_STEPS_api-v2.md`, step 8 (needs its step 6, nginx, first).
+
+### 5.5 Fast-forward webapp_nukissiorfiit's `main` to `2026.3`
+
+- [ ] Done
+
+```bash
+# WSL, webapp_nukissiorfiit
+cd /mnt/c/thin/02_Code/python_web_apps/webapp_nukissiorfiit
+git merge-base --is-ancestor main 2026.3 && git branch -f main '2026.3^{commit}' && git push origin main
+```
 
 ## 6. T15: switch-over (your decision, later)
 
