@@ -6,7 +6,7 @@ Steps only you can do, in order. Host-side steps (deploys, nginx, `main` of dtu_
 
 All commands are for **WSL** (bash; Docker Desktop's `docker` works there). Every block starts with its `cd`, so it can be pasted from any directory.
 
-**State 2026-11-15:** phase 1 released and deployed (`webapp_nuki 2026.2`). Phase 2 code is done (T8-T13, review fixes T16, faster first load T17, on `agent-api-v2-phase2`); no agent is working. **Path to the phase 2 release:** step 3 (nginx) and step 4 (your second look) in any order, then step 5. Steps 2.4 and 2.6 are still open too.
+**State 2026-11-15:** phase 1 released and deployed (`webapp_nuki 2026.2`). Phase 2 code is done (T8-T13, review fixes T16, faster first load T17, on `agent-api-v2-phase2`); no agent is working. **Path to the phase 2 release:** step 3 (nginx) and step 4 (your second look) in any order, then step 5.
 
 ## 1. T5: check phase 1 against the local backend
 
@@ -99,13 +99,13 @@ git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phase1   # --
 
 ## 3. nginx timeout 120 s (needed before step 5)
 
-- [ ] Done
+- [x] Done 2026-11-15
 
 `proxy_read_timeout 120s` for `/app/nuki/` is merged in dtu_sus_web_server (`a603fbe`) but not live: the nuki playbook does not reload nginx. Deploy it with `playbook_install_nginx.yml`: dtu_sus_web_server `USER_STEPS_api-v2.md`, steps 6-7.
 
 ## 4. Review phase 2
 
-- [ ] Done (first look 2026-11-15: findings fixed in T16 `90b95a5`; T17 `cfdb573` makes the first load faster; second look open)
+- [x] Done 2026-11-15 (first look 2026-11-15: findings fixed in T16 `90b95a5`; T17 `cfdb573` makes the first load faster; second look open)
 
 Review the commits and the open questions in STATUS:
 
