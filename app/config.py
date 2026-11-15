@@ -1,5 +1,7 @@
+import re
+
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from dotenv import load_dotenv
 from pathlib import Path
 import os
@@ -16,10 +18,31 @@ class ConfigSettings(BaseSettings):
     influxdb_url: str = Field(..., env="INFLUXDB_URL")
     influxdb_token: str = Field(..., env="INFLUXDB_TOKEN")
     influxdb_org: str = Field(..., env="INFLUXDB_ORG")
-    backend_api_base_url: str = Field("http://host.docker.internal:8099/api/v1", env="BACKEND_API_BASE_URL")
+    # Root of the monitoring_db API (a trailing /api/v1 or /api/v2 is stripped by db_connector)
+    backend_api_base_url: str = Field("http://host.docker.internal:8099", env="BACKEND_API_BASE_URL")
     backend_api_timeout_seconds: float = Field(30.0, env="BACKEND_API_TIMEOUT_SECONDS")
+    # Retries of connection errors only (a 504 or a read timeout is never retried)
     backend_api_max_retries: int = Field(2, env="BACKEND_API_MAX_RETRIES")
     backend_api_backoff_factor: float = Field(0.5, env="BACKEND_API_BACKOFF_FACTOR")
+    # Most /raw requests in flight at once per data call, and the years per /raw request
+    backend_api_max_parallel: int = Field(2, gt=0, env="BACKEND_API_MAX_PARALLEL")
+    backend_api_raw_chunk_years: int = Field(1, gt=0, env="BACKEND_API_RAW_CHUNK_YEARS")
+    # Stations whose identifier fully matches this regular expression are shown
+    nuki_station_pattern: str = Field(r"^(SIS2024-0[1-5]|NUKI202[0-9]-.+)$", env="NUKI_STATION_PATTERN")
+
+    @field_validator("nuki_station_pattern")
+    @classmethod
+    def _check_station_pattern(cls, value):
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(f"NUKI_STATION_PATTERN is not a valid regular expression ({exc}): {value!r}") from None
+        return value
+
+    @property
+    def station_regex(self):
+        """nuki_station_pattern compiled (use with fullmatch)."""
+        return re.compile(self.nuki_station_pattern)
 
     class Config:
         env_file = ".env"

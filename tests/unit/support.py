@@ -8,8 +8,9 @@ tests/run.sh copies the checkout's app/ over /app first, so the checkout's code 
 without a rebuild.
 
 Every test gets its own stub API (tests/fake_api.py) on 127.0.0.1 in a thread, and the
-backend settings of the app pointed at it (production URL form, .../mdb/api/v1), with no
-retries and no backoff unless a test sets them. No test depends on another.
+backend settings of the app pointed at it (root URL form, .../mdb; self.v1_url is the
+production form .../mdb/api/v1), with no retries and no backoff unless a test sets them, and
+the connector's metadata caches emptied. No test depends on another.
 """
 import os
 import socket
@@ -30,7 +31,7 @@ import db_connector  # noqa: E402
 import fake_api  # noqa: E402
 
 FIXTURES = TESTS_DIR / "fixtures"
-DEVEUI = "feedbeefcafe0002"   # Mast 6, the device in the fixtures
+DEVEUI = "feedbeefcafe0002"   # Mast 6 Tekbox (device 10), also the device of the v1 fixture
 
 
 class ApiTestCase(unittest.TestCase):
@@ -42,13 +43,19 @@ class ApiTestCase(unittest.TestCase):
         thread.start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
-        self.base_url = f"http://127.0.0.1:{self.server.server_port}/mdb/api/v1"
+        self.root_url = f"http://127.0.0.1:{self.server.server_port}/mdb"
+        self.v1_url = self.root_url + "/api/v1"
+        self.base_url = self.root_url
         self.set_settings(
             backend_api_base_url=self.base_url,
             backend_api_timeout_seconds=5.0,
             backend_api_max_retries=0,
             backend_api_backoff_factor=0.0,
+            backend_api_max_parallel=2,
+            backend_api_raw_chunk_years=1,
         )
+        db_connector.clear_caches()
+        self.addCleanup(db_connector.clear_caches)
 
     def set_settings(self, **values):
         for key, value in values.items():
@@ -57,7 +64,8 @@ class ApiTestCase(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def api_requests(self, endpoint):
-        """Query parameters of the requests to <endpoint> ("metadata" or "measurements")."""
+        """Query parameters of the requests to <endpoint>, a path suffix ("metadata": v1 and
+        v2, "v2/metadata", "measurements": v1, "measurements/raw")."""
         return [params for path, params in self.server.requests if path.endswith("/" + endpoint)]
 
 
