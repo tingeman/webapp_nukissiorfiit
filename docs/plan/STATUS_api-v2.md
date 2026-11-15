@@ -1,6 +1,6 @@
 # Status: API v2 refactoring
 
-Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Branch: `agent-api-v2`.
+Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_STEPS_api-v2.md). Branch: `agent-api-v2` (phase 1), `agent-api-v2-phase2` (phase 2).
 
 ## Now
 
