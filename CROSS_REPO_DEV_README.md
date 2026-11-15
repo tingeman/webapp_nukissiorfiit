@@ -3,8 +3,8 @@
 This file is the operational guide for cross-repo local development and the place to document ongoing intended usage and workflow changes.
 
 ## TODOs
-[] Ensure backend settings are in development and production .env files. Currently app is falling back to hard coded default settings (Release-C fix)
-[] Remove `/app/django_integration` folder, and `mdb-postgres.env` files, they are no longer used after transition to data retrieval through REST API (Release-C fix)
+[] Ensure backend settings are in development and production .env files. Currently app is falling back to hard coded default settings (Release-C fix) See webapp_nuki.env.example for the variables and defaults.
+[] Remove `/app/django_integration` folder, and `mdb-postgres.env` files, they are no longer used after transition to data retrieval through REST API (Release-C fix) (roadmap R3)
 
 
 ## Scope

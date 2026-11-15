@@ -1,20 +1,21 @@
 # webapp_nukissiorfiit
 
 ## TODO list
-[] Date range does not seem to go beyond 2025-01-30?? This seems to be related to session persistence. Fix to update max_end_date dynamically attempted (is it fixed?)
+[] Date range does not seem to go beyond 2025-01-30?? This seems to be related to session persistence. Fix to update max_end_date dynamically attempted (is it fixed?) (planned: docs/plan/PLAN_api-v2.md, phase 2)
 [x] Filtering of data should include all datapoints on the last date of th  e daterange 
-[] New graph with temperature as a function of depth. A slider should allow user to iterate through the entire date range. Should plot the daily average at each sensor depth.
-[] Something is wrong with the table of measurements, it doesn't show timestamps
-[] Inclinations in 3 separate but linked axes, so that variations are visible (individual scales)
-[] Map insert with location of station (grab location from station table in database)
-[] Photo of station (we will have to discuss how to best implement this)
-[] Remove old code that interacts with influxdb
-[] Link the zooming in all axes (zoom in one axis should zoom in all axes – I know this is possible)
-[] Some sort of indication that “I am working on it…” when data is being updated (Low priority, now that we have fast updates)
+[] New graph with temperature as a function of depth. A slider should allow user to iterate through the entire date range. Should plot the daily average at each sensor depth. (planned: docs/plan/PLAN_api-v2.md, phase 2)
+[] Something is wrong with the table of measurements, it doesn't show timestamps (planned: docs/plan/PLAN_api-v2.md, phase 2)
+[] Inclinations in 3 separate but linked axes, so that variations are visible (individual scales) (planned: docs/plan/PLAN_api-v2.md, phase 2)
+[] Map insert with location of station (grab location from station table in database) (roadmap R6)
+[] Photo of station (we will have to discuss how to best implement this) (roadmap R7)
+[] Remove old code that interacts with influxdb (roadmap R3)
+[] Link the zooming in all axes (zoom in one axis should zoom in all axes – I know this is possible) (planned: docs/plan/PLAN_api-v2.md, phase 2)
+[] Some sort of indication that “I am working on it…” when data is being updated (Low priority, now that we have fast updates) (planned: docs/plan/PLAN_api-v2.md, phase 2)
 [x] Graph of battery voltage (Maybe move to less prominent location?)
 
 ## Notes
 - ***2025-08-29:*** Required packages in requirements.txt are not version number locked. An automatic rebuild in connection with an ansible relaunch of the server, must have caused upgrading of some packages that introduced new behavior. The app now by default runs in async mode, which is incompatible with calls to the Django ORM. Fixed by wrapping all calls to `db_connector` functions that access the Django ORM with a call to `asgiref.sync.sync_to_async()`. This problem stresses the need to keep all Django ORM access separate in the `db_connector` module, for better mainainability.
+- ***2026-11-15:*** The app is being moved from the monitoring_db API v1 to v2 (docs/plan/PLAN_api-v2.md). Phase 1 keeps the page and adds a logger selector (Tekbox / Campbell CR350 per mast); a new page will be developed side by side at /app/nuki/v2/.
 
 ## Release build and tests
 
