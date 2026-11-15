@@ -75,6 +75,14 @@ Always raw (user decision 2026-11-15): a 2-year range of one logger is about 17 
 
 ### Phase 2 outline (refined in its own planning session before T7)
 
+**Side by side with phase 1 (user requirement 2026-11-15).** The phase 1 page stays until you decide to switch, and users can move between the two pages. Proposed (to confirm in the phase 2 session):
+
+- Phase 2 is a second `Dash` instance on the same Flask `server`, in its own package (`app/next/`), at `/app/nuki/next/`. Phase 1 stays at `/app/nuki/` unchanged. Each page has a link to the other ("Try the new page" / "Back to the classic page").
+- No deployment change: nginx's `location /app/nuki/` already proxies the sub-path, and the port, healthcheck (`/app/nuki/`) and env are unchanged. Separate Dash instances keep component IDs and callbacks apart.
+- Shared: `config.py` and the API data access (phase 1's `db_connector` catalogue, metadata cache and chunked raw fetch; phase 2 adds `/daily`). Phase 2 must not change phase 1's behaviour; phase 1's tests keep running.
+- The switch-over is its own task (T14, after your decision): swap the routes (new page at `/app/nuki/`, classic at `/app/nuki/classic/` for a while or removed), then remove the classic page as a separate change.
+- API effect: two pages share the same per-process caches. Load only grows as much as users actually use the new page.
+
 Taken from the TSP app: module split (`layout.py`, `callbacks.py`, `figures.py`, `texts.py`, `api_client.py`), the Daily/Full switch (`/daily` for the overview; `/raw` thinned with `rawseries.thin` and refetched for the zoom window via `relayoutData`), `dcc.Loading`, the timing/size info line, and the error texts. Different from TSP: every sensor group is shown, all in **one `make_subplots` figure with `shared_xaxes`**, so zoom and pan apply to all rows (README TODO): ground temperature, air temperature, humidity, pressure, one row per inclination angle with its own scale (README TODO), heading, sensor temperature, battery. Daily mode draws the mean with a min/max band. The **ground temperature profile**: temperature against depth for one day (daily mean, min/max shaded), with a slider over the days of the loaded range. It uses `/daily` data that the overview already loaded (in Full mode one extra `/daily` request set for the period). A **combined "All loggers" view** of a mast joins the records by depth (the strings were redeployed with the same serials on Masts 6 and 12; Mast 9 has a new string, which stays separate).
 
 ## Assumptions
@@ -126,13 +134,14 @@ Taken from the TSP app: module split (`layout.py`, `callbacks.py`, `figures.py`,
 
 ### Phase 2 (tasks refined in a planning session after T6; the list is the intended scope)
 
-- **T7.** Split `app.py` into `layout.py`, `callbacks.py`, `figures.py`, `texts.py` (TSP structure), no change in behaviour. Agent: implementer.
+- **T7.** New page skeleton in `app/next/` (`layout.py`, `callbacks.py`, `figures.py`, `texts.py`, TSP structure), mounted at `/app/nuki/next/` on the same server, with links between the two pages. Phase 1's `app.py` stays as it is (only the link is added). Tests: both pages answer 200, and the phase 1 tests are unchanged. Agent: implementer.
 - **T8.** Daily/Full switch: `/api/v2/measurements/daily` in the connector (3-year chunks), daily figures with a min/max band; Full mode thinned (`rawseries.thin`, about 2000 points per series) and refetched for the zoom window (`relayoutData`). API effect: the default view drops to 1 small daily request set; Full adds 1 bounded raw set per zoom. Agent: implementer.
 - **T9.** One figure with linked x axes for all panels (ground temperature, air temperature, humidity, pressure, one row per inclination angle with its own scale, heading, sensor temperature, battery). Agent: implementer.
 - **T10.** Ground temperature profile with day slider (daily mean against depth, min/max shaded). Agent: implementer.
 - **T11.** "All loggers" view of a mast (joined by depth, a marker at the logger change). API effect: one request set per logger (2 instead of 1). Agent: implementer.
 - **T12.** Small items: `dcc.Loading` indicator, date limits from metadata (fixes the README TODO about the end date and session persistence), the table (timestamps column, or drop the table), the timing/size info line. Agent: implementer.
-- **T13.** Release phase 2 (you), as T6.
+- **T13.** Release phase 2 alongside phase 1 (you), as T6.
+- **T14.** Switch-over, only after your decision: the new page goes to `/app/nuki/`, the classic page moves to `/app/nuki/classic/` or is removed (its removal is a separate commit). Check the healthcheck path. Agent: implementer.
 
 ## Notes on the sensor definitions in monitoring_db (for you; no change in this plan)
 
