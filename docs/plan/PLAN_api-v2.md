@@ -119,7 +119,7 @@ Effect on the API, per action:
 
 The default view costs less than phase 1 (one small daily request instead of 1 to 3 raw chunks). The download is the heaviest action (about 0.5 MB on the wire per logger-year), bounded by the logger lives (about 2 years each) and by `BACKEND_API_MAX_PARALLEL`.
 
-**Time limits.** API statement timeout 20 s per query (504), `BACKEND_API_TIMEOUT_SECONDS` 30 s per request, gunicorn `--timeout 120`, and nginx `location /app/nuki/` has no `proxy_read_timeout`, so nginx's default of **60 s** applies (the TSP location sets 120 s). Page actions (at most 2 requests) stay well below. A download can make up to 8 requests in 4 rounds, so it gets a **time budget** (`DOWNLOAD_TIME_BUDGET_S`, default 50 s, below nginx's limit): the client's `_fetch` takes an optional deadline and starts no new chunk after it; the download then fails with "Download too large; choose fewer years or loggers", so no API work runs on after nginx has given up. Recommended for dtu_sus_web_server (yours to change, not part of this plan): `proxy_read_timeout 120s` in `location /app/nuki/`, as for TSP; the budget can then go up to about 100 s. Dash background callbacks (job queue + disk cache) were considered and left out: a new dependency and shared state for downloads of a few MB.
+**Time limits.** API statement timeout 20 s per query (504), `BACKEND_API_TIMEOUT_SECONDS` 30 s per request, gunicorn `--timeout 120`, and nginx `location /app/nuki/`: `proxy_read_timeout 120s` (dtu_sus_web_server `agent-fixes` `396cc0a`, 2026-11-15, not yet deployed; until then nginx's default of 60 s applies). Page actions (at most 2 requests) stay well below. A download can make up to 8 requests in 4 rounds, so it gets a **time budget** (`DOWNLOAD_TIME_BUDGET_S`, default **75 s**): the client's `_fetch` takes an optional deadline and starts no new chunk after it; the download then fails with "Download too large; choose fewer years or loggers", so no API work runs on after nginx has given up. A chunk started just before the deadline can still run for `BACKEND_API_TIMEOUT_SECONDS` (30 s), and the workbook takes a few seconds, so budget + 30 s + build must stay below 120 s. With nginx at 60 s the budget would have to be about 25 s, so the nginx change must be deployed before phase 2 is released (T14). Dash background callbacks (job queue + disk cache) were considered and left out: a new dependency and shared state for downloads of a few MB.
 
 ## Assumptions
 
@@ -220,6 +220,7 @@ Phase 1 is released on its own (T6). Phase 2 is developed on `agent-api-v2-phase
 - Deployment impact: none
 
 ### T14. Release phase 2 alongside phase 1 (you)
+- Before: merge dtu_sus_web_server `agent-fixes` (`396cc0a`, nginx `proxy_read_timeout 120s` for `/app/nuki/`) into its `develop/main` and deploy nginx (`playbook_install_nginx.yml`); check with `curl -sI https://arctic.sustain.dtu.dk/app/nuki/` that the page still answers.
 - As T6, with the tag on `develop/main` after `agent-api-v2-phase2` is merged (with your permission). Then check `/app/nuki/v2/` on the server: Daily load times, a Full zoom, an All-loggers download for Mast 6, and the API log for the request counts in the table above.
 
 ### T15. Switch-over (only after your decision)
