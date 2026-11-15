@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released and deployed as 2026.2 (`655aa0a`) 2026-11-15; open: production checks, `main` fast-forward, nginx deploy (USER_STEPS steps 2c, 3). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; next: your review of `/app/nuki/v2/` (USER_STEPS step 4), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released and deployed as 2026.2 (`655aa0a`) 2026-11-15; open: production checks, `main` fast-forward, nginx deploy (USER_STEPS steps 2c, 3). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; your review done 2026-11-15; next T16 (review fixes, implementer), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 

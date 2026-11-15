@@ -219,6 +219,20 @@ Phase 1 is released on its own (T6). Phase 2 is developed on `agent-api-v2-phase
 - Agent: simple-task
 - Deployment impact: none
 
+### T16. Review fixes (your review 2026-11-15)
+- Files: `app/v2/figures.py`, `callbacks.py`, `layout.py`, `profile.py`, `texts.py`, `assets/` (a clientside profile script), `style.css`, tests.
+- Changes:
+  1. Daily: no min/max bands (unclear to the viewer, and they spanned gaps). Row titles say what is shown: daily means (Daily) or every measurement / thinned (Full). The min/max stay in the Excel daily sheet.
+  2. Every row of the linked figure shows its own time-axis tick labels (not only the bottom row).
+  3. Profile slider updates the profile continuously while dragging, without a server round trip: the server precomputes per day what the profile needs (mean, min, max per depth, and the annual envelope with trumpet's 90 % rule, tested against `trumpet.trumpet`); a clientside callback draws the chosen day. No API request.
+  4. Daily/Full switch keeps the zoom (as webapp_grl_tsp `24872f4`): Daily to Full while zoomed loads raw for the visible window (at most one year) and keeps the x range; Full to Daily keeps the x range.
+  5. Download: the "All" checkbox reads "Toggle all recording devices at this station".
+  6. Layout: on wide screens the profile card takes half the width, the download card (redesigned to fit) the other half; stacked on narrow screens.
+- API: no new request pattern (the switch with a zoom asks for less than the whole range).
+- Validation: full `bash tests/run.sh webapp_nuki:local`; look at the page in a browser.
+- Agent: implementer
+- Deployment impact: none
+
 ### T14. Release phase 2 alongside phase 1 (you)
 - Before: merge dtu_sus_web_server `agent-fixes` (`396cc0a`, nginx `proxy_read_timeout 120s` for `/app/nuki/`) into its `develop/main` and deploy nginx (`playbook_install_nginx.yml`); check with `curl -sI https://arctic.sustain.dtu.dk/app/nuki/` that the page still answers.
 - As T6, with the tag on `develop/main` after `agent-api-v2-phase2` is merged (with your permission). Then check `/app/nuki/v2/` on the server: Daily load times, a Full zoom, an All-loggers download for Mast 6, and the API log for the request counts in the table above.
