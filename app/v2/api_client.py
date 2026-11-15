@@ -211,7 +211,7 @@ def _add_years(when: dt.datetime, years: int) -> dt.datetime:
 
 def raw_chunks(start, end, years: int, now: dt.datetime | None = None) -> list:
     """As ``daily_chunks``, but in pieces of ``years`` years counted from the start (phase 1's
-    rule: a 366-day Full view is 1 or 2 requests, wherever it starts)."""
+    rule; a Full view of one year up to its end date is one request)."""
     if years < 1:
         raise ValueError("years must be 1 or more")
     first, last = _bounds(start, end, now)

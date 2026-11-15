@@ -1,2 +1,5 @@
 # Shell scripts run in Linux containers and WSL; keep LF on Windows checkouts too.
 *.sh text eol=lf
+# Vendored Bootstrap CSS of the phase 2 page: kept byte-identical to the published file (its
+# hashes are in the README, "Third-party files"), so no line-ending conversion.
+app/v2/assets/bootstrap.min.css -text

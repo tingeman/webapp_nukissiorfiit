@@ -1,0 +1,136 @@
+/* Phase 2 page style (app/v2/), on top of Bootstrap 5.3.8 (bootstrap.min.css in this folder,
+   vendored unchanged; version, source and hash in the README, "Third-party files"). Dash
+   includes every .css file of app/v2/assets/ in alphabetical order, so Bootstrap loads
+   first. Only the phase 2 Dash app serves this folder: the classic page (/app/nuki/) does
+   not load it.
+
+   Adapted from webapp_grl_tsp/app/assets/style.css (prefix nuki- instead of tsp-). Palette:
+   neutral greys and one accent colour (--nuki-accent). The plot colours are set in
+   figures.py, not here. */
+
+:root {
+  --nuki-accent: #1d4f91;
+  --nuki-accent-dark: #163d70;
+  --nuki-accent-soft: #e8eef7;
+  --nuki-bg: #f4f6f8;
+  --nuki-ink: #212529;
+  --nuki-muted: #6c757d;
+  --nuki-border: #e3e7eb;
+  --nuki-radius: 0.6rem;
+
+  --bs-primary: var(--nuki-accent);
+  --bs-primary-rgb: 29, 79, 145;
+  --bs-link-color: var(--nuki-accent);
+  --bs-link-color-rgb: 29, 79, 145;
+  --bs-body-color: var(--nuki-ink);
+  --bs-body-bg: var(--nuki-bg);
+
+  /* Dash 4 core components (slider, dropdown, date picker) in the same accent */
+  --Dash-Fill-Interactive-Strong: var(--nuki-accent);
+  --Dash-Fill-Interactive-Weak: var(--nuki-accent-soft);
+  --Dash-Fill-Primary-Hover: var(--nuki-accent-soft);
+  --Dash-Fill-Primary-Active: var(--nuki-accent-soft);
+}
+
+body {
+  background: var(--nuki-bg);
+  color: var(--nuki-ink);
+  font-size: 0.95rem;
+}
+
+/* ---- header ---------------------------------------------------------------------------- */
+.nuki-header {
+  background: #ffffff;
+  border-bottom: 1px solid var(--nuki-border);
+  border-top: 4px solid var(--nuki-accent);
+  padding: 1.1rem 0 0.9rem;
+  margin-bottom: 1.25rem;
+}
+.nuki-title {
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.nuki-subtitle {
+  color: var(--nuki-muted);
+  margin: 0.15rem 0 0;
+}
+
+.nuki-main { padding-bottom: 2rem; }
+
+/* ---- cards ------------------------------------------------------------------------------ */
+.nuki-card {
+  border: 1px solid var(--nuki-border);
+  border-radius: var(--nuki-radius);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  background: #ffffff;
+}
+.nuki-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--nuki-muted);
+  margin-bottom: 0.5rem;
+}
+.nuki-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--nuki-muted);
+  margin-bottom: 0.3rem;
+}
+
+/* ---- buttons (Bootstrap primary in the accent colour) ---------------------------------- */
+.btn-primary {
+  --bs-btn-bg: var(--nuki-accent);
+  --bs-btn-border-color: var(--nuki-accent);
+  --bs-btn-hover-bg: var(--nuki-accent-dark);
+  --bs-btn-hover-border-color: var(--nuki-accent-dark);
+  --bs-btn-active-bg: var(--nuki-accent-dark);
+  --bs-btn-active-border-color: var(--nuki-accent-dark);
+  --bs-btn-disabled-bg: var(--nuki-accent);
+  --bs-btn-disabled-border-color: var(--nuki-accent);
+}
+.btn-outline-primary {
+  --bs-btn-color: var(--nuki-accent);
+  --bs-btn-border-color: var(--nuki-accent);
+  --bs-btn-hover-bg: var(--nuki-accent);
+  --bs-btn-hover-border-color: var(--nuki-accent);
+  --bs-btn-active-bg: var(--nuki-accent);
+  --bs-btn-active-border-color: var(--nuki-accent);
+  --bs-btn-disabled-color: var(--nuki-accent);
+  --bs-btn-disabled-border-color: var(--nuki-accent);
+}
+.nuki-btn { min-width: 6.5rem; height: 38px; }
+
+/* ---- controls --------------------------------------------------------------------------- */
+.nuki-period { display: block; }
+.nuki-period .DateRangePickerInput,
+.nuki-period input { width: 100%; }
+
+/* ---- messages --------------------------------------------------------------------------- */
+.nuki-alert { border-radius: var(--nuki-radius); padding: 0.6rem 0.9rem; }
+
+/* ---- info line -------------------------------------------------------------------------- */
+.nuki-intro { color: var(--nuki-muted); }
+.nuki-info { min-height: 1.5rem; font-size: 0.85rem; color: var(--nuki-muted); margin-bottom: 0.25rem; }
+.nuki-info-what { color: var(--nuki-ink); }
+.nuki-info-api { font-variant-numeric: tabular-nums; }
+.nuki-info-note { color: #8a5a00; }
+.nuki-details { font-size: 0.8rem; }
+.nuki-details summary { cursor: pointer; }
+.nuki-requests { margin: 0.3rem 0 0; padding-left: 1.1rem; font-variant-numeric: tabular-nums; }
+
+/* ---- footer ----------------------------------------------------------------------------- */
+.nuki-footer {
+  color: var(--nuki-muted);
+  font-size: 0.8rem;
+  border-top: 1px solid var(--nuki-border);
+  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 767.98px) {
+  .nuki-title { font-size: 1.3rem; }
+}

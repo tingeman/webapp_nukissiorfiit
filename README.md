@@ -81,6 +81,24 @@ docker build --target dev -t webapp_nuki:dev .                    # or build the
   `/app/secrets/.env.development`); docker creates the empty mount point `app/secrets/` in
   the checkout, which git ignores.
 
+## Third-party files
+
+- `app/v2/assets/bootstrap.min.css` (phase 2 page, `/app/nuki/v2/`): Bootstrap **5.3.8**,
+  unchanged, copied byte for byte from webapp_grl_tsp `app/assets/bootstrap.min.css`, which
+  was downloaded from `https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css`
+  (2026-11-10, 232111 bytes, MIT licence in its header). Integrity
+  `sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB` (the SRI
+  published by getbootstrap.com for 5.3.8), sha256
+  `d85327d99c7a3ee1f9b5d0500d1370acea3ad2db39c163c2f51f232baedbdede` (equal to jsDelivr's
+  package listing and to webapp_grl_tsp's copy; a unit test checks it). `.gitattributes`
+  keeps it byte-identical (`-text`). Served by the phase 2 Dash app itself under
+  `/app/nuki/v2/assets/`, so the page needs no CDN; the classic page does not load it. To
+  update: take the new file from webapp_grl_tsp (or download it and check its hash against
+  the published SRI), replace the file and update this paragraph, the hash in
+  `tests/unit/test_v2_page.py` and `app/v2/assets/style.css`'s header.
+  dash-bootstrap-components 2.0 supports Bootstrap 5.3.
+- plotly.js and the Dash renderer come from the installed Python packages (`serve_locally`).
+
 ## Installation
 
 1) Clone repository from github

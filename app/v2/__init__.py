@@ -10,24 +10,44 @@ first app that sets itself up (on the first request to the server, whatever its 
 The package is imported as ``v2`` (app/ is the module root: WORKDIR /app in the image, /app on
 sys.path in the unit tests). Its modules import each other relatively, so their names
 (layout, callbacks, texts) cannot collide with top-level modules of app/.
+
+Static files: app/v2/assets/ (Bootstrap 5.3.8 CSS, vendored, and style.css), served by this
+Dash app only, under /app/nuki/v2/assets/ (the classic app's assets folder is app/assets/,
+which does not exist, so the classic page is unaffected). plotly.js and the Dash renderer
+come from the installed packages (serve_locally): the page loads nothing from a third-party
+server.
+
+One API client per process (``create_app`` makes it from the settings unless one is given):
+its constructor only sets plain attributes and a lock, so it is safe with gunicorn --preload.
 """
+from pathlib import Path
+
 from dash import Dash
 
-from . import callbacks, layout, texts
+from . import api_client, callbacks, layout, texts
 
 URL_PREFIX = "/app/nuki/v2/"
 CLASSIC_URL = "/app/nuki/"
+ASSETS = Path(__file__).resolve().parent / "assets"
 
 
-def create_app(server) -> Dash:
-    """The phase 2 Dash app on the given Flask server, under URL_PREFIX."""
+def create_app(server, client: api_client.Client | None = None) -> Dash:
+    """The phase 2 Dash app on the given Flask server, under URL_PREFIX. ``client``: the API
+    client (default: one from config.settings)."""
+    if client is None:
+        import config       # app/config.py (top-level module); reads the env file at import
+        client = api_client.Client.from_settings(config.settings)
     dash_app = Dash(
         __name__,
         server=server,
         title=texts.PAGE_TITLE,
+        update_title=None,
         requests_pathname_prefix=URL_PREFIX,
         routes_pathname_prefix=URL_PREFIX,
+        assets_folder=str(ASSETS),
+        serve_locally=True,
+        meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
     )
     dash_app.layout = layout.build(CLASSIC_URL)
-    callbacks.register(dash_app)
+    callbacks.register(dash_app, client)
     return dash_app

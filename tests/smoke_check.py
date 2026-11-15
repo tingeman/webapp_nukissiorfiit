@@ -14,6 +14,13 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
              logger: six figures built from the stub data (tests/fixtures/make_fixtures.py
              describes the values) and the ground temperature table; and without a logger,
              six "Select a mast and logger" figures
+  v2callback POST /app/nuki/v2/_dash-update-component for the phase 2 page's callbacks in
+             the order the page runs them: load_masts (Mast 6, Mast 9, Mast 13), fill_loggers
+             (Mast 6: default the Campbell, the logger with the latest data), set_period (its
+             first..last day), load_data Daily (one figure: ground temperature, weather,
+             pressure in kPa, the two angles, sensor temperature, battery; mean lines with
+             min/max bands) and Full (the same rows, one line per series), and zoom_data on
+             a window of the Full figure (its traces patched)
 """
 import base64
 import json
@@ -92,9 +99,10 @@ def layout_text(fig, key):
     return t.get("text") if isinstance(t, dict) else t
 
 
-def call(outputs, inputs, state=(), changed=None):
-    """POST one callback: outputs [(id, prop)], inputs/state [(id, prop, value)]. Returns
-    {id: {prop: value}} of the outputs the callback set."""
+def call(outputs, inputs, state=(), changed=None, base=BASE):
+    """POST one callback: outputs [(id, prop)] (a prop may carry Dash's "@<hash>" of an
+    allow_duplicate output), inputs/state [(id, prop, value)]. Returns {id: {prop: value}} of
+    the outputs the callback set ({} when it changed nothing: HTTP 204)."""
     payload = {
         "output": ".." + "...".join(f"{i}.{p}" for i, p in outputs) + "..",
         "outputs": [{"id": i, "property": p} for i, p in outputs],
@@ -103,7 +111,7 @@ def call(outputs, inputs, state=(), changed=None):
         "state": [{"id": i, "property": p, "value": v} for i, p, v in state],
     }
     req = urllib.request.Request(
-        BASE + "_dash-update-component", data=json.dumps(payload).encode(),
+        base + "_dash-update-component", data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
     name = payload["output"]
     try:
@@ -111,6 +119,8 @@ def call(outputs, inputs, state=(), changed=None):
             status, body = r.status, r.read()
     except urllib.error.HTTPError as e:
         fail(f"POST {name}: HTTP {e.code}: {e.read()[:300]!r}")
+    if status == 204:
+        return {}
     if status != 200:
         fail(f"POST {name}: HTTP {status}")
     return json.loads(body)["response"]
@@ -212,6 +222,83 @@ def check_callback():
           f"logger from the stub data, table {TABLE_ROWS} rows; no logger: 6 messages")
 
 
+# ---- phase 2 page ------------------------------------------------------------------------------
+
+V2 = BASE + "v2/"
+V2_ROWS = ["Ground temperature", "Air temperature", "Relative humidity", "Barometric pressure",
+           "Inclination XAngle", "Inclination YAngle", "Sensor temperature", "Battery voltage"]
+
+
+def v2_call(outputs, inputs, state=()):
+    return call(outputs, inputs, state, base=V2)
+
+
+def v2_duplicate_outputs(outputs):
+    """The output spec of the v2 callback with these outputs (allow_duplicate ones carry
+    "@<hash>"), from the page's _dash-dependencies."""
+    with urllib.request.urlopen(V2 + "_dash-dependencies", timeout=20) as r:
+        deps = json.loads(r.read())
+    wanted = [f"{i}.{p}" for i, p in outputs]
+    for d in deps:
+        parts = d["output"].strip(".").split("...")
+        if [re.sub(r"@[0-9a-f]+$", "", x) for x in parts] == wanted:
+            return [tuple(x.rsplit(".", 1)) for x in parts]
+    fail(f"v2: no callback with the outputs {wanted}")
+
+
+def v2_load(logger, start, end, resolution):
+    r = v2_call([("data-graph", "figure"), ("info", "children"), ("message", "children"), ("view", "data")],
+                [("logger", "value", logger), ("period", "start_date", start),
+                 ("period", "end_date", end), ("resolution", "value", resolution)])
+    if r["message"]["children"]:
+        fail(f"v2 {resolution}: message {json.dumps(r['message']['children'])[:300]}")
+    fig, view = r["data-graph"]["figure"], r["view"]["data"]
+    titles = [a.get("text") for a in fig.get("layout", {}).get("annotations", [])]
+    if titles != V2_ROWS:
+        fail(f"v2 {resolution}: row titles {titles}, expected {V2_ROWS}")
+    pressure = [t for t in fig["data"] if t.get("yaxis") == "y4" and t.get("fill") is None]
+    p0 = values(pressure[0]["y"])[0] if pressure else None
+    if p0 is None or abs(p0 - 101.3) > 0.2:
+        fail(f"v2 {resolution}: first pressure value {p0}, expected about 101.3 (kPa)")
+    return fig, view
+
+
+def check_v2_callback():
+    r = v2_call([("masts", "data"), ("mast", "options"), ("mast", "value"), ("masts-message", "children")],
+                [("url", "pathname", "/app/nuki/v2/")])
+    masts = r["masts"]["data"]
+    names = [o["value"] for o in r["mast"]["options"]]
+    if names != ["Mast 6", "Mast 9", "Mast 13"] or r["mast"]["value"] != "Mast 6":
+        fail(f"v2 masts: options {names}, value {r['mast']['value']!r}, message {r['masts-message']['children']}")
+    r = v2_call([("logger", "options"), ("logger", "value")], [("mast", "value", "Mast 6")],
+                state=[("masts", "data", masts)])
+    if r["logger"]["value"] != CAMPBELL_M6 or len(r["logger"]["options"]) != 2:
+        fail(f"v2 Mast 6 loggers: {r['logger']}")
+    props = ["min_date_allowed", "max_date_allowed", "start_date", "end_date"]
+    r = v2_call([("period", p) for p in props] + [("period", "initial_visible_month")],
+                [("logger", "value", CAMPBELL_M6)], state=[("masts", "data", masts)])
+    period = [r["period"][p] for p in props]
+    if period != ["2026-10-01", "2026-10-05", "2026-10-01", "2026-10-05"]:
+        fail(f"v2 period: {period}")
+    fig, view = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "daily")
+    bands = sum(1 for t in fig["data"] if t.get("fill") == "tonexty")
+    if view.get("mode") != "daily" or bands != 10:
+        fail(f"v2 daily: view {view.get('mode')}, {bands} min/max bands (expected 10)")
+    fig, view = v2_load(CAMPBELL_M6, "2026-10-01", "2026-10-05", "full")
+    if view.get("mode") != "full" or [t.get("meta") for t in fig["data"]] != view.get("keys"):
+        fail(f"v2 full: view {view}")
+    outputs = v2_duplicate_outputs([("data-graph", "figure"), ("info", "children"), ("message", "children")])
+    r = call(outputs, [("data-graph", "relayoutData",
+                        {"xaxis.range[0]": "2026-10-02 00:00:00", "xaxis.range[1]": "2026-10-03 00:00:00"})],
+             state=[("view", "data", view)], base=V2)
+    ops = (r.get("data-graph", {}).get("figure") or {}).get("operations") or []
+    if len([op for op in ops if op.get("location", [None])[-1] == "x"]) != len(view["keys"]):
+        fail(f"v2 zoom: {json.dumps(r)[:300]}")
+    print(f"OK v2: 3 masts, Mast 6 default {CAMPBELL_M6}, period {period[2]}..{period[3]}, "
+          f"{len(V2_ROWS)} rows Daily ({bands} bands) and Full ({len(view['keys'])} lines), zoom patched")
+
+
 if __name__ == "__main__":
-    {"index": check_index, "v2index": check_v2_index, "callback": check_callback}.get(
+    {"index": check_index, "v2index": check_v2_index, "callback": check_callback,
+     "v2callback": check_v2_callback}.get(
         sys.argv[1] if len(sys.argv) > 1 else "", lambda: fail(__doc__))()

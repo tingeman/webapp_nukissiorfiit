@@ -106,7 +106,10 @@ class PagesTest(unittest.TestCase):
         # every id a callback uses is in the layout of its own app
         self.assertLessEqual(callback_ids(app.app), layout_ids(app.app))
         self.assertLessEqual(callback_ids(app.v2_app), layout_ids(app.v2_app))
-        self.assertFalse(set(new) & set(classic))
+        # each app's callbacks are its own functions (both pages may use ids like "logger", so
+        # equal keys alone do not mean a callback was copied over)
+        self.assertEqual({cb["callback"].__module__ for cb in classic.values()}, {"app"})
+        self.assertEqual({cb["callback"].__module__ for cb in new.values()}, {"v2.callbacks"})
 
     def test_no_global_callback_decorator(self):
         """app.py and app/v2/ register callbacks with app.callback, never the global dash.callback"""
