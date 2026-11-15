@@ -1,6 +1,6 @@
 # The development server is started with the command:
 # docker compose -f compose.develop.yml up --build
-# It builds the Dockerfile's dev stage (IPython, ipdb, gunicorn --reload, one worker) and
+# It builds the Dockerfile's dev stage (IPython, ipdb, gunicorn --reload, one worker with 4 threads) and
 # mounts ./app over /app, so a code change reloads the app without a rebuild. Rebuild after
 # a change to app/requirements*.txt or the Dockerfile. See README, "Development".
 
