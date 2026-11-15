@@ -1,6 +1,6 @@
 # Plan: API v2 refactoring (phase 1: v2 data access and logger selector; phase 2: TSP-style page)
 
-Status: **phase 1 approved 2026-11-15; phase 2 planned 2026-11-15 (awaiting approval)**. Roadmap: R1, R2 (phase 1); R5 (phase 2). Branch: `agent-api-v2` (from `develop/api_v2/main`).
+Status: **phase 1 approved 2026-11-15; phase 2 approved 2026-11-15**. Roadmap: R1, R2 (phase 1); R5 (phase 2). Branch: `agent-api-v2` (from `develop/api_v2/main`).
 
 ## Goal
 
@@ -105,7 +105,7 @@ Callbacks are plain sync functions, as in TSP (gunicorn runs sync workers, so `s
 - **Profile**: temperature against depth for one day, from the daily data already loaded, with a day slider over the loaded days. Envelope selector (decided 2026-11-15: both, the user chooses): "Day min/max" (band of the chosen day, default), "Annual envelope" (min/max of the daily means over the 365 days up to the chosen day, TSP's trumpet), "Both". In Full mode one extra `/daily` request set for the range feeds the profile.
 - **All loggers** (on request; decided 2026-11-15): the mast's loggers are fetched one after the other (1 daily request each); series are joined by depth (ground temperature) or series name, with a vertical marker at each logger change. Mast 9's two stations are different strings at different places, so their series stay apart (separate legend groups).
 
-**Download** (decided 2026-11-15): a panel with its own selectors: from year / to year (calendar years, default the first and last year with data of the selected loggers), the mast's loggers (checklist with "All", default all), and a button. The file is an **Excel workbook** (`openpyxl`, new hash-locked dependency): an `Info` sheet (mast, loggers, range, download time, column details: sensor, series, unit, depth), then per logger a `<logger> full` sheet (every raw measurement, one column per series) and a `<logger> daily` sheet (mean, min, max per series). Sheet names at most 31 characters. Built in memory and sent with `dcc.Download`; the button is disabled while a download runs.
+**Download** (decided 2026-11-15): a panel with its own selectors: from year / to year (calendar years, default the first and last year with data of the selected loggers), the mast's loggers (checklist with "All", default all), and a button. The file is an **Excel workbook** (`openpyxl`, new hash-locked dependency): an `Info` sheet (mast, loggers, range, download time, column details: sensor, series, unit, depth), then per logger a `<logger> full` sheet (every raw measurement, one column per series) and a `<logger> daily` sheet (mean, min, max and count per series, from `/daily`). Not zipped: an .xlsx is already a zip archive. Sheet names at most 31 characters. Built in memory and sent with `dcc.Download`; the button is disabled while a download runs.
 
 Effect on the API, per action:
 
@@ -119,6 +119,8 @@ Effect on the API, per action:
 
 The default view costs less than phase 1 (one small daily request instead of 1 to 3 raw chunks). The download is the heaviest action (about 0.5 MB on the wire per logger-year), bounded by the logger lives (about 2 years each) and by `BACKEND_API_MAX_PARALLEL`.
 
+**Time limits.** API statement timeout 20 s per query (504), `BACKEND_API_TIMEOUT_SECONDS` 30 s per request, gunicorn `--timeout 120`, and nginx `location /app/nuki/` has no `proxy_read_timeout`, so nginx's default of **60 s** applies (the TSP location sets 120 s). Page actions (at most 2 requests) stay well below. A download can make up to 8 requests in 4 rounds, so it gets a **time budget** (`DOWNLOAD_TIME_BUDGET_S`, default 50 s, below nginx's limit): the client's `_fetch` takes an optional deadline and starts no new chunk after it; the download then fails with "Download too large; choose fewer years or loggers", so no API work runs on after nginx has given up. Recommended for dtu_sus_web_server (yours to change, not part of this plan): `proxy_read_timeout 120s` in `location /app/nuki/`, as for TSP; the budget can then go up to about 100 s. Dash background callbacks (job queue + disk cache) were considered and left out: a new dependency and shared state for downloads of a few MB.
+
 ## Assumptions
 
 - Branch `agent-api-v2` from `develop/api_v2/main` (the branch you are on).
@@ -127,7 +129,7 @@ The default view costs less than phase 1 (one small daily request instead of 1 t
 - The InfluxDB settings stay required in phase 1. Their removal goes with the legacy cleanup (R3) as a separate change.
 - gunicorn stays at 4 sync workers. Threaded workers are deferred (R4): with 2 parallel requests per callback, 4 workers x 4 threads could put 32 requests on the API's 4 workers.
 - No local Python: all tests run in Docker (`tests/run.sh`). Ruff, mypy and pytest are not set up.
-- Phase 2: the page has no data table; the Excel download replaces it. The download's "loggers" are those of the selected mast; "All" means all loggers of that mast, not all masts. Years are calendar years (UTC). The daily sheet has mean, min and max per series (no count). Downloads are not cached.
+- Phase 2: the page has no data table; the Excel download replaces it. The download's "loggers" are those of the selected mast; "All" means all loggers of that mast, not all masts. Years are calendar years (UTC). The daily sheet comes from the API's `/daily` (mean, min, max, count), not computed from raw: page and file agree, one place aggregates; it differs from raw only on days where several timeseries share a column key (read_api.md), which no Nuki logger has today. Downloads are not cached.
 - Phase 2: the date picker keeps no session persistence (the logger sets the range); the Daily/Full choice and the envelope choice persist per browser session (`persistence_type="session"`).
 - Phase 2: the daily data comes from the API's `/daily` (the same numbers as the page), not computed from raw in the app.
 
@@ -178,7 +180,7 @@ Phase 1 is released on its own (T6). Phase 2 is developed on `agent-api-v2-phase
 
 ### T8. API client v2 and the stub's `/daily`
 - Files: `app/v2/api_client.py`, `app/v2/rawseries.py` and `app/v2/trumpet.py` (ported from webapp_grl_tsp), `app/v2/texts.py` (error texts), `app/config.py` (`BACKEND_API_DAILY_CHUNK_YEARS`, default 3), `tests/fake_api.py` and `tests/fixtures/make_fixtures.py` (`/api/v2/measurements/daily`: per UTC day mean/min/max/count, same selectors and errors as `/raw`), `tests/unit/test_v2_api_client.py`, `tests/run.sh` (file list, if needed).
-- Acceptance: as in "Phase 2 design", API client table. Unit tests: root URL normalisation; connect retry, but one request only on a 504 or read timeout (`ApiError` with the timeout text); metadata caches (second call makes no request, failures not cached); catalogue (pattern, Mast 9 grouping, Mast 13 without its empty Tekbox, non-Nuki stations left out); daily chunks at 1 August, raw chunks from the start, datetimes for a zoom window; at most `max_parallel` in flight; `Accept-Encoding` contains gzip; selections (ground temperature by depth, inclination by `Angle`, heading by `Heading`, pressure in kPa for Pa/hPa/kPa, an unknown unit unconverted with a WARNING); thinning keeps each bucket's min and max. `app/v2/` does not import `db_connector`. Phase 1 code and tests unchanged.
+- Acceptance: as in "Phase 2 design", API client table. Unit tests: root URL normalisation; connect retry, but one request only on a 504 or read timeout (`ApiError` with the timeout text); metadata caches (second call makes no request, failures not cached); catalogue (pattern, Mast 9 grouping, Mast 13 without its empty Tekbox, non-Nuki stations left out); daily chunks at 1 August, raw chunks from the start, datetimes for a zoom window; at most `max_parallel` in flight; `Accept-Encoding` contains gzip; selections (ground temperature by depth, inclination by `Angle`, heading by `Heading`, pressure in kPa for Pa/hPa/kPa, an unknown unit unconverted with a WARNING); thinning keeps each bucket's min and max; `_fetch` with a deadline starts no chunk after it. `app/v2/` does not import `db_connector`. Phase 1 code and tests unchanged.
 - Validation: `TEST_FILTER='^unit:' APP_SRC=app bash tests/run.sh webapp_nuki:local`, then the full suite (tests/ changed).
 - Agent: implementer
 - Deployment impact: none (new optional variable with a default).
@@ -206,13 +208,13 @@ Phase 1 is released on its own (T6). Phase 2 is developed on `agent-api-v2-phase
 
 ### T12. Excel download
 - Files: `app/requirements.in` (`openpyxl`), the lock files regenerated with `python scripts/compile_lock.py`, `app/v2/download.py` (workbook builder, no Dash), `layout.py`, `callbacks.py`, `texts.py`, tests.
-- Acceptance: as in "Phase 2 design", Download: year range (default all years with data), logger checklist with "All" (default all), button disabled while running; `Info` sheet, then `<logger> full` and `<logger> daily` per logger, names at most 31 characters; requests as in the API table (test: logger after logger, at most `max_parallel` in flight). A test opens the workbook with openpyxl and checks sheet names, headers, row counts against the fixtures, and that the daily mean/min/max match the stub.
+- Acceptance: as in "Phase 2 design", Download: year range (default all years with data), logger checklist with "All" (default all), button disabled while running; `Info` sheet, then `<logger> full` and `<logger> daily` per logger, names at most 31 characters; requests as in the API table (test: logger after logger, at most `max_parallel` in flight). A test opens the workbook with openpyxl and checks sheet names, headers, row counts against the fixtures, and that the daily mean/min/max/count match the stub; a download over the time budget stops starting chunks and shows the "too large" text (test with a slow stub).
 - Validation: rebuild the image (requirements changed), full `bash tests/run.sh webapp_nuki:local`.
 - Agent: implementer
 - Deployment impact: none (the image grows slightly)
 
 ### T13. Docs and env
-- Files: `webapp_nuki.env.example` (`BACKEND_API_DAILY_CHUNK_YEARS`), `README.md` (the v2 page, its modules, the download; TODO list updated).
+- Files: `webapp_nuki.env.example` (`BACKEND_API_DAILY_CHUNK_YEARS`, `DOWNLOAD_TIME_BUDGET_S`), `README.md` (the v2 page, its modules, the download; TODO list updated).
 - Validation: review, unit tests.
 - Agent: simple-task
 - Deployment impact: none

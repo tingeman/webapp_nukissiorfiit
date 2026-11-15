@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Branch: `agent-api-v2`.
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check against the local backend, then T6 (release). Phase 2 planned 2026-11-15 (plan, "Phase 2 design" and T8-T15), **awaiting your approval**; then T8 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check against the local backend, then T6 (release). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); next T8 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 
@@ -27,3 +27,4 @@ Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check ag
 - Stations shown: only identifiers fully matching `NUKI_STATION_PATTERN`, default `^(SIS2024-0[1-5]|NUKI202[0-9]-.+)$` (decision 2026-11-15).
 - Bugs that phase 1 fixes on the way: Mast 13 showed the DTU test device (`feedbeefcafe0005`); pressure labelled kPa but stored in Pa. Pressure stays plotted in kPa: the connector converts it by the column's unit (decision 2026-11-15).
 - Phase 2 decisions 2026-11-15: own client `app/v2/api_client.py` (TSP's Client, ApiError, daily/raw, rawseries, plus db_connector's catalogue, R1 connect-only retries, column selection, kPa); Daily default, Full at most 366 days (zoom refetches); latest logger default, All loggers on request; profile with both envelopes, the user chooses; table replaced by an Excel download (openpyxl) with own selectors and Full/Daily sheets per logger; Bootstrap bundled as in TSP; the per-station metadata requests at catalogue build accepted (also for v2's own cache).
+- Follow-up 2026-11-15: the daily sheet has counts (the API's `/daily` already returns `count`); no zip (xlsx is already compressed); downloads get a time budget `DOWNLOAD_TIME_BUDGET_S` (default 50 s) because nginx `location /app/nuki/` has no `proxy_read_timeout` (default 60 s). For you, in dtu_sus_web_server: `proxy_read_timeout 120s` there, as for TSP.
