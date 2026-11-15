@@ -229,6 +229,7 @@ Phase 1 is released on its own (T6). Phase 2 is developed on `agent-api-v2-phase
   5. Download: the "All" checkbox reads "Toggle all recording devices at this station".
   6. Layout (changed after the review, 2026-11-15): on wide screens the profile card takes 2/3 of the width and the download card 1/3, not stretched to equal height, its elements stacked with the button right after the checklist; below `lg` both full width, download under the profile. Card borders clearly darker on the whole page. A separate trumpet card (TSP-style, per hydrological year) is left for later (roadmap), when loggers have a full year of data.
   7. A heading above the figure, written by the same callback as the figure, names the drawn data: mast, station, logger (or All loggers), Daily/Full, period. The profile label names mast and logger too. A failed load clears the figure and shows the error with the selection, so no stale plots pass as the current selection.
+  8. Full: a zoom or pan loads raw for the visible window within the selected period (at most one year: a wider window loads its last year, with a note), not only within the first loaded year (panning back in time showed an empty plot).
 - API: no new request pattern (the switch with a zoom asks for less than the whole range).
 - Validation: full `bash tests/run.sh webapp_nuki:local`; look at the page in a browser.
 - Agent: implementer
