@@ -172,7 +172,7 @@ git push origin agent-api-v2-phase2 develop/main 2026.3
 
 ### 5.3 Build and test
 
-- [ ] Done (only after step 4 is OK)
+- [x] Done 2026-11-15 (tarball `48dcf67f...`, image `ed4b45d7...`, tests passed)
 
 ```bash
 # WSL, dtu_sus_web_server
