@@ -61,7 +61,7 @@ The tests use a stub of the monitoring_db API (`tests/fake_api.py`, fixtures in
 ### Development (dev stage)
 
 The Dockerfile has three stages: `runtime` (the production image), `dev` (runtime plus
-IPython/ipdb from `app/requirements-dev.txt`, gunicorn with `--reload`, one worker,
+IPython/ipdb from `app/requirements-dev.txt`, gunicorn with `--reload`, one worker with 4 threads,
 `--timeout 0`) and `prod` (= runtime). Releases run a plain `docker build`, which builds the
 last stage, `prod`, only: the dev tools never reach a release, and `prod` must stay last.
 

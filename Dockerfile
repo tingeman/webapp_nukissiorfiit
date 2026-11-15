@@ -96,8 +96,10 @@ RUN set -ex && \
 USER plotly
 # --reload: restart the worker when a .py file changes (polling, works on bind mounts from
 # Windows). One worker and --timeout 0, so a breakpoint (ipdb) is not killed by the
-# worker timeout; attach to it with docker attach <container>.
-CMD ["gunicorn", "-b", "0.0.0.0:8050", "--workers", "1", "--timeout", "0", "--reload", "app:server"]
+# worker timeout; attach to it with docker attach <container>. --threads 4 (gthread worker):
+# without nginx in front, a browser's idle speculative connection would block a single sync
+# worker forever (no timeout); gthread waits on connections without blocking the others.
+CMD ["gunicorn", "-b", "0.0.0.0:8050", "--workers", "1", "--threads", "4", "--timeout", "0", "--reload", "app:server"]
 
 
 # ---- prod: the release image. Must be the LAST stage (see the top of this file). ----------
