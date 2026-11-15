@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check against the local backend, then T6 (release). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8, T9 done; next T10 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15. Next: **T6 (you)**, the release. Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8, T9 done; next T10 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 
@@ -14,9 +14,12 @@ Phase 1 approved 2026-11-15, code done (T1-T4). Next: **T5 (you)**, the check ag
 - T7 2026-11-15 (branch `agent-api-v2-phase2`): skeleton page at `/app/nuki/v2/`, a second Dash app on the same Flask server (`app/v2/`), links both ways, the classic data callback moved from the global `@callback` to `@app.callback` (Dash puts global callbacks into whichever app sets up first); suite 109 passed (`fd42b1d`)
 - T8 2026-11-15: `app/v2/api_client.py` (Client, ApiError, daily/raw sharing `_fetch` with max_parallel and a deadline, daily chunks at 1 August, catalogue and caches, selections incl. heading/sensor temp, kPa), rawseries/trumpet ported, stub `/daily`, env template lists the two new variables; suite 169 passed (`61298b4`)
 - T9 2026-11-15: v2 page: selectors from the catalogue, period from the logger, Daily with min/max bands, Full (one year up to the end date, one raw request, thinned, refetch on zoom by Patch), one `make_subplots` figure, info line, Bootstrap bundled (sha256 as TSP, `-text` in `.gitattributes`); suite 196 passed (`2a12010`)
+- T5 2026-11-15 (you, local backend): 5 masts with the expected loggers; default ranges have data; inclination Roll/Pitch (Tekbox) and X/Y (Campbell); pressure about 100 kPa for both; 1-3 contiguous `/raw` chunks per update (a picker edit of start and end is 2 updates); backend paused: "Backend request timed out" after the read timeout, no retry and no second GET; nginx stopped: 2 connect retries, then "An unknown error occurred"; API time for one Tekbox year (Mast 6) 0.5-1.4 s, 27-33 KB gzip (plan estimate was about 1 MB: the real data is much sparser)
 - T4 2026-11-15: env template, README and cross-repo TODOs (`00a2f98`)
 
 ## Open questions
+
+- Phase 1, unreachable backend: the page says "An unknown error occurred" (as in the v1 era) and logs a traceback. Optional small fix on `agent-api-v2` before T6: a `BackendUnreachable` error with the text "Backend not reachable". The v2 page already has its own text (`API_UNREACHABLE`). Phase 1 logs nothing on a timeout (the v2 client logs one WARNING).
 
 - Full limit: implemented as "one year up to the end date" (365 or 366 days) instead of "366 days", so Full is always one raw request (a 366-day window over a non-leap year was 2 requests). Agent decision 2026-11-15, within the plan's intent; say if you want 366 days back.
 - The v2 page has not been looked at by eye yet (tests only); see USER_STEPS step 4.
