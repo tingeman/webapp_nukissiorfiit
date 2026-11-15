@@ -1,8 +1,7 @@
 """Unit tests of app/db_connector.py against the stub monitoring_db API (tests/fake_api.py):
 base URL, retries and error mapping, metadata caches, the mast catalogue, chunked v2 raw
-data, the selection helpers, and the legacy v1 functions the page uses until T3. The fixture
-data is described in tests/fixtures/make_fixtures.py. Each test's docstring is its name in
-the test output ("unit: db_connector: <docstring>")."""
+data, the selection helpers and the date normalisation. The fixture data is described in
+tests/fixtures/make_fixtures.py. Each test's docstring is its name in the test output ("unit: db_connector: <docstring>")."""
 import asyncio
 import logging
 import os
@@ -15,7 +14,7 @@ from unittest import mock
 import pandas as pd
 import pydantic
 
-from support import DEVEUI, ApiTestCase, closed_port, config, db_connector, fake_api, silent_port
+from support import ApiTestCase, closed_port, config, db_connector, fake_api, silent_port
 
 DAY = "2026-10-01"
 DAY_START = "2026-10-01T00:00:00Z"
@@ -93,16 +92,6 @@ class BaseUrlTest(ApiTestCase):
             with self.assertNoLogs("db_connector", level="WARNING"):
                 self.assertEqual(db_connector._root_url(), self.root_url)
 
-    def test_v1_legacy_path(self):
-        """with the production form .../mdb/api/v1 the v1 functions still call <root>/api/v1/measurements"""
-        self.set_settings(backend_api_base_url=self.v1_url)
-        db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
-        self.assertEqual(
-            self.server.requests,
-            [("/mdb/api/v1/measurements",
-              {"deveui": DEVEUI, "sensor_name": "BatteryVoltage", "start": DAY_START, "end": DAY_END})],
-        )
-
     def test_v2_path(self):
         """with the production form .../mdb/api/v1 the raw data comes from <root>/api/v2/measurements/raw"""
         self.set_settings(backend_api_base_url=self.v1_url)
@@ -127,14 +116,6 @@ class RetryTest(ApiTestCase):
         self.server.force = fake_api.QUERY_TIMEOUT
         with self.assertRaises(db_connector.QueryTimeout):
             db_connector.get_logger_data(TEKBOX_M6, "2026-09-01", "2026-09-05")
-        self.assertEqual(len(self.server.requests), 1)
-
-    def test_504_not_retried(self):
-        """504 on the v1 path is not retried either: one request, then QueryTimeout"""
-        self.set_settings(backend_api_max_retries=2)
-        self.server.force = fake_api.QUERY_TIMEOUT
-        with self.assertRaises(db_connector.QueryTimeout):
-            db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
         self.assertEqual(len(self.server.requests), 1)
 
     def test_read_timeout(self):
@@ -453,6 +434,12 @@ class LoggerDataTest(ApiTestCase):
         with self.assertRaisesRegex(ValueError, "^bad start$"):
             db_connector.get_logger_data(TEKBOX_M6, "2026-09-01", "2026-09-05")
 
+    def test_400_no_json(self):
+        """400 without a JSON body raises ValueError 'Invalid backend API request'"""
+        self.server.force = (400, b"<html>bad request</html>")
+        with self.assertRaisesRegex(ValueError, "^Invalid backend API request$"):
+            db_connector.get_logger_data(TEKBOX_M6, "2026-09-01", "2026-09-05")
+
     def test_500(self):
         """500 on /raw raises RuntimeError (internal error)"""
         self.server.force = (500, {"error": {"code": "INTERNAL_ERROR", "message": "x", "details": {}}})
@@ -478,8 +465,7 @@ class LoggerDataTest(ApiTestCase):
         """get_logger_data_async returns the same data; the wrappers are not thread-sensitive"""
         data = asyncio.run(db_connector.get_logger_data_async(TEKBOX_M6, "2026-09-01", "2026-09-01"))
         self.assertEqual(len(data.frame), 8)
-        for name in ("mast_catalogue_async", "get_logger_data_async", "get_sensor_data_async",
-                     "get_ground_temp_async", "get_ground_temp_sensor_depths_async"):
+        for name in ("mast_catalogue_async", "get_logger_data_async"):
             self.assertIs(getattr(db_connector, name)._thread_sensitive, False, name)
 
 
@@ -604,115 +590,6 @@ class DateTest(unittest.TestCase):
         end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
         self.assertTrue(before <= end_dt <= after, end)
         self.assertTrue(before - timedelta(days=30) <= start_dt <= after - timedelta(days=30), start)
-
-
-# ---- v1 (legacy, until T3) --------------------------------------------------------------------
-
-class V1RequestTest(ApiTestCase):
-    def test_sensor_request(self):
-        """get_sensor_data sends GET <root>/api/v1/measurements with deveui, sensor_name, start, end"""
-        db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
-        self.assertEqual(
-            self.server.requests,
-            [("/mdb/api/v1/measurements",
-              {"deveui": DEVEUI, "sensor_name": "BatteryVoltage", "start": DAY_START, "end": DAY_END})],
-        )
-
-    def test_ground_temp_request(self):
-        """get_ground_temp reads metadata, then asks for the groundtemp sensors with sensor_name__in"""
-        db_connector.get_ground_temp(DEVEUI, DAY, DAY)
-        self.assertEqual([p for p, _ in self.server.requests],
-                         ["/mdb/api/v1/metadata", "/mdb/api/v1/measurements"])
-        self.assertEqual(self.api_requests("metadata"), [{}])
-        self.assertEqual(
-            self.api_requests("measurements"),
-            [{"deveui": DEVEUI, "sensor_name__in": "GroundTemp01,GroundTemp02,GroundTemp03",
-              "start": DAY_START, "end": DAY_END}],
-        )
-
-
-class V1ErrorTest(ApiTestCase):
-    def test_404(self):
-        """v1: 404 (unknown deveui) raises RecordingDeviceNotFound"""
-        with self.assertRaises(db_connector.RecordingDeviceNotFound):
-            db_connector.get_sensor_data("0000000000000000", "BatteryVoltage", DAY, DAY)
-
-    def test_400_message(self):
-        """v1: 400 raises ValueError with the API's error message"""
-        self.server.force = (400, {"error": {"code": "INVALID_QUERY", "message": "bad start", "details": {}}})
-        with self.assertRaisesRegex(ValueError, "^bad start$"):
-            db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
-
-    def test_400_no_json(self):
-        """400 without a JSON body raises ValueError 'Invalid backend API request'"""
-        self.server.force = (400, b"<html>bad request</html>")
-        with self.assertRaisesRegex(ValueError, "^Invalid backend API request$"):
-            db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
-
-    def test_500(self):
-        """v1: 500 raises RuntimeError (internal error)"""
-        self.server.force = (500, {"error": {"code": "INTERNAL_ERROR", "message": "x", "details": {}}})
-        with self.assertRaisesRegex(RuntimeError, r"internal error \(500\)"):
-            db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
-
-    def test_invalid_json(self):
-        """v1: 200 with a body that is not JSON raises RuntimeError"""
-        self.server.force = (200, b"not json")
-        with self.assertRaisesRegex(RuntimeError, "invalid JSON"):
-            db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
-
-    def test_read_timeout(self):
-        """v1: an API that does not answer within the timeout raises QueryTimeout"""
-        sock, port = silent_port()
-        self.addCleanup(sock.close)
-        self.set_settings(backend_api_base_url=f"http://127.0.0.1:{port}/mdb/api/v1",
-                          backend_api_timeout_seconds=0.5)
-        with self.assertRaises(db_connector.QueryTimeout):
-            db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", DAY, DAY)
-
-    def test_empty(self):
-        """v1: no rows in the range raises EmptyQuerySet"""
-        with self.assertRaises(db_connector.EmptyQuerySet):
-            db_connector.get_sensor_data(DEVEUI, "BatteryVoltage", "2025-01-01", "2025-01-02")
-
-    def test_no_ground_sensors(self):
-        """a device without groundtemp sensors in the metadata raises EmptyQuerySet, no measurements request"""
-        self.server.fixtures["metadata"] = {"sensors": []}
-        with self.assertRaises(db_connector.EmptyQuerySet):
-            db_connector.get_ground_temp(DEVEUI, DAY, DAY)
-        self.assertEqual(self.api_requests("measurements"), [])
-
-
-class V1FrameTest(ApiTestCase):
-    def test_sensor_frame(self):
-        """measurements JSON becomes a UTC-indexed, sorted DataFrame with timeseries names as columns"""
-        frame = db_connector.get_sensor_data(DEVEUI, "Weather Sensor", DAY, DAY)
-        self.assertEqual(list(frame.columns), ["AirTemp", "RelHum", "BarometricPressure"])
-        self.assertIsInstance(frame.index, pd.DatetimeIndex)
-        self.assertEqual(str(frame.index.tz), "UTC")
-        self.assertTrue(frame.index.is_monotonic_increasing)
-        self.assertEqual(list(frame.index.strftime("%H:%M")), ["00:00", "01:00", "02:00"])
-        self.assertEqual(list(frame["AirTemp"]), [-8.4, -8.9, -9.2])
-
-    def test_ground_temp_frame(self):
-        """get_ground_temp returns sensor names as columns and datatype None"""
-        frame, datatype = db_connector.get_ground_temp(DEVEUI, DAY, DAY)
-        self.assertIsNone(datatype)
-        self.assertEqual(list(frame.columns), ["GroundTemp01", "GroundTemp02", "GroundTemp03"])
-        self.assertEqual(list(frame["GroundTemp02"]), [-2.25, -2.3, -2.35])
-
-    def test_depths(self):
-        """get_ground_temp_sensor_depths maps groundtemp sensors to relative_z, shallow to deep"""
-        self.assertEqual(
-            list(db_connector.get_ground_temp_sensor_depths(DEVEUI).items()),
-            [("GroundTemp01", -0.1), ("GroundTemp02", -0.25), ("GroundTemp03", -0.5)],
-        )
-
-    def test_async_wrapper(self):
-        """the async wrapper used by the Dash callback returns the same DataFrame"""
-        frame = asyncio.run(db_connector.get_sensor_data_async(DEVEUI, "BatteryVoltage", DAY, DAY))
-        self.assertEqual(list(frame.columns), ["BatteryVoltage"])
-        self.assertEqual(list(frame["BatteryVoltage"]), [3.71, 3.70, 3.69])
 
 
 if __name__ == "__main__":

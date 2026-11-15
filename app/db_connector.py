@@ -1,6 +1,6 @@
 """All data access of the app: the monitoring_db read API over HTTP.
 
-API v2 (the phase 1 page):
+API v2 (the phase 1 page, app.py):
 
     mast_catalogue()                    -> [{"name", "station_identifiers", "loggers"}], by mast number
     default_logger(mast)                -> the logger of a mast with the latest data
@@ -19,9 +19,6 @@ at most BACKEND_API_MAX_PARALLEL in flight). <root> is BACKEND_API_BASE_URL with
 
 Nothing but plain values and locks is created at import: gunicorn imports the app with
 --preload and then forks, so sessions and thread pools are made per call.
-
-The v1 measurement functions (get_sensor_data, get_ground_temp,
-get_ground_temp_sensor_depths) are what the page uses until T3 switches it to v2.
 """
 import logging
 import re
@@ -486,139 +483,8 @@ def inclination(data):
     return _select(data, keys, [data.columns[k]["timeseries_name"] for k in keys])
 
 
-# ---- v1 (legacy, until T3 switches the page) --------------------------------------------------
-
-def _build_dataframe_from_measurements(payload):
-    rows = payload.get("data", [])
-    if not rows:
-        raise EmptyQuerySet("No data found for the given query")
-
-    frame = pd.DataFrame(rows)
-    if "timestamp" not in frame.columns:
-        raise RuntimeError("Backend API response missing timestamp column")
-
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
-    frame.set_index("timestamp", inplace=True)
-    frame.sort_index(inplace=True)
-    frame.drop_duplicates(inplace=True)
-    return frame
-
-
-def _to_timeseries_columns(frame):
-    renamed = {}
-    for col in frame.columns:
-        if "__" in col:
-            renamed[col] = col.split("__", 1)[1]
-        else:
-            renamed[col] = col
-
-    frame = frame.rename(columns=renamed)
-    # Preserve deterministic order while removing duplicated names.
-    frame = frame.loc[:, ~frame.columns.duplicated()]
-    return frame
-
-
-def _get_metadata_payload():
-    return _api_get("api/v1/metadata", params={})
-
-
-def _get_ground_temp_sensor_names(deveui):
-    payload = _get_metadata_payload()
-    sensor_names = [
-        sensor.get("name")
-        for sensor in payload.get("sensors", [])
-        if sensor.get("recording_device_deveui") == deveui and sensor.get("name") and "groundtemp" in sensor["name"].lower()
-    ]
-    sensor_names = sorted(set(sensor_names))
-    return sensor_names
-
-
-def close_all_stale_db_connections():
-    # Kept for backward compatibility; no-op on REST path.
-    return None
-
-
-def get_sensor_data(deveui, sensor_name, start, stop):
-    close_all_stale_db_connections()
-    start_iso, end_iso = _normalize_range_for_api(start, stop)
-
-    payload = _api_get(
-        "api/v1/measurements",
-        params={
-            "deveui": deveui,
-            "sensor_name": sensor_name,
-            "start": start_iso,
-            "end": end_iso,
-        },
-    )
-
-    frame = _build_dataframe_from_measurements(payload)
-    frame = _to_timeseries_columns(frame)
-    return frame
-
-
-def get_ground_temp(deveui, start, stop):
-    close_all_stale_db_connections()
-    start_iso, end_iso = _normalize_range_for_api(start, stop)
-
-    sensor_names = _get_ground_temp_sensor_names(deveui)
-    if not sensor_names:
-        raise EmptyQuerySet("No data found for the given query")
-
-    payload = _api_get(
-        "api/v1/measurements",
-        params={
-            "deveui": deveui,
-            "sensor_name__in": ",".join(sensor_names),
-            "start": start_iso,
-            "end": end_iso,
-        },
-    )
-
-    frame = _build_dataframe_from_measurements(payload)
-
-    # Keep the old dataframe contract where columns are ground-temperature sensor names.
-    ground_columns = [
-        col for col in frame.columns if "__" in col and "groundtemp" in col.lower()
-    ]
-    if not ground_columns:
-        raise EmptyQuerySet("No data found for the given query")
-
-    renamed = {col: col.split("__", 1)[0] for col in ground_columns}
-    frame = frame[ground_columns].rename(columns=renamed)
-    frame = frame.loc[:, ~frame.columns.duplicated()]
-
-    # Legacy return contract expected a datatype object; unit is unused by current app code.
-    datatype = None
-    return frame, datatype
-
-
-def get_ground_temp_sensor_depths(deveui):
-    close_all_stale_db_connections()
-
-    payload = _get_metadata_payload()
-    depths = {}
-    for sensor in payload.get("sensors", []):
-        if sensor.get("recording_device_deveui") != deveui:
-            continue
-        name = sensor.get("name")
-        if not name or "groundtemp" not in name.lower():
-            continue
-        depths[name] = sensor.get("relative_z")
-
-    if not depths:
-        raise EmptyQuerySet("No data found for the given query")
-
-    # Keep deterministic ordering from shallow to deep matching the old behavior.
-    return dict(sorted(depths.items(), key=lambda item: item[1], reverse=True))
-
-
 # ---- async wrappers for the Dash callbacks ----------------------------------------------------
 # thread_sensitive=False: each call runs in the executor's own threads (no ORM any more).
 
 mast_catalogue_async = asgiref.sync.sync_to_async(mast_catalogue, thread_sensitive=False)
 get_logger_data_async = asgiref.sync.sync_to_async(get_logger_data, thread_sensitive=False)
-
-get_sensor_data_async = asgiref.sync.sync_to_async(get_sensor_data, thread_sensitive=False)
-get_ground_temp_async = asgiref.sync.sync_to_async(get_ground_temp, thread_sensitive=False)
-get_ground_temp_sensor_depths_async = asgiref.sync.sync_to_async(get_ground_temp_sensor_depths, thread_sensitive=False)

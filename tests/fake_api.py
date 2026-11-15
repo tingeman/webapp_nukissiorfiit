@@ -1,4 +1,4 @@
-"""Minimal stand-in for the monitoring_db read API (v1 and v2), used by tests/run.sh and the
+"""Minimal stand-in for the monitoring_db read API (v1 metadata, v2), used by tests/run.sh and the
 unit tests.
 
     python fake_api.py <fixtures-dir> [port] [host]
@@ -12,17 +12,12 @@ production form http://host/mdb/api/v1/... and the root form http://host/mdb/api
   GET <prefix>/api/v1/metadata           <fixtures-dir>/metadata.json, narrowed by station/serial
   GET <prefix>/api/v2/metadata           the same plus first/last_measurement_time
   GET <prefix>/api/v2/measurements/raw   columnar data of <fixtures-dir>/measurements_v2.json
-  GET <prefix>/api/v1/measurements       LEGACY: rows of <fixtures-dir>/measurements_v1.json
-                                         ({"<deveui>": [row, ...]}), as the app used it before
-                                         the move to v2; goes when nothing uses it any more
 
 The fixtures are written by fixtures/make_fixtures.py (see its docstring for the stations,
 devices, ids and periods). metadata.json is the v1 metadata shape; its timeseries carry the
 fixture-only fields "_datatype" and "_unit" (not served in the metadata, like the real API;
 used for the column details of v2). measurements_v2.json is {"<timeseries id>": [[time,
-value], ...]}. The v1 measurements fixture is separate and older (3 hourly rows of
-feedbeefcafe0002 on 2026-10-01, with the series names the app's v1 code and the smoke test
-expect: InclX/InclY, pressure in kPa); it is not derived from the v2 data.
+value], ...]}.
 
 The shapes and rules follow monitoring_db (docs/read_api.md, app/monitoring_db/views.py):
 
@@ -53,8 +48,8 @@ Test controls (in-process only):
                     status and body (a dict is sent as JSON, bytes as they are; gzip
                     applies to the v2 measurement paths as usual)
   server.fixtures   the loaded fixtures ("metadata", "measurements" (v2: {timeseries id:
-                    [(datetime, time string, value), ...]}), "measurements_v1"); a test
-                    may replace parts of it
+                    [(datetime, time string, value), ...]})); a test may replace parts
+                    of it
   QUERY_TIMEOUT     (504, body) of the real API's statement timeout, for server.force
 
 Only the standard library is used, so it runs with the image's own python. From the
@@ -104,65 +99,6 @@ def _iso_seconds(value):
 
 def _nulls_last(value):
     return (value is None, value or "")
-
-
-# ---- v1 measurements (legacy) -------------------------------------------------------------
-
-def measurements(fixtures, params):
-    unknown = sorted(set(params) - MEASUREMENT_PARAMS)
-    if unknown:
-        return _error(400, "INVALID_QUERY", "Unsupported query parameters supplied.", {"params": unknown})
-    deveui = params.get("deveui")
-    if not deveui:
-        return _error(400, "INVALID_QUERY", "deveui is required.")
-    rows = fixtures["measurements_v1"].get(deveui)
-    if rows is None:
-        return _error(404, "DEVEUI_NOT_FOUND", "Recording device not found.", {"deveui": deveui})
-    try:
-        start = _parse_time(params["start"]) if params.get("start") else None
-        end = _parse_time(params["end"]) if params.get("end") else None
-    except ValueError:
-        return _error(400, "INVALID_QUERY", "start and end must be ISO 8601 timestamps.")
-    if start and end and start > end:
-        return _error(400, "INVALID_QUERY", "start must be before end.")
-
-    names = None
-    if params.get("sensor_name"):
-        names = {params["sensor_name"]}
-    elif params.get("sensor_name__in"):
-        names = {n for n in params["sensor_name__in"].split(",") if n}
-
-    columns = ["timestamp"]
-    data = []
-    for row in sorted(rows, key=lambda r: r["timestamp"]):
-        ts = _parse_time(row["timestamp"])
-        if (start and ts < start) or (end and ts > end):
-            continue
-        out = {"timestamp": row["timestamp"]}
-        for key, value in row.items():
-            if key == "timestamp" or (names is not None and key.split("__", 1)[0] not in names):
-                continue
-            out[key] = value
-            if key not in columns:
-                columns.append(key)
-        if len(out) > 1:
-            data.append(out)
-    details = [
-        {"key": key, "sensor_name": key.split("__", 1)[0], "timeseries_name": key.split("__", 1)[1]}
-        for key in columns[1:]
-    ]
-    return 200, {
-        "request": {"deveui": deveui, "serial": None, "station": None,
-                    "start": params.get("start"), "end": params.get("end"),
-                    "filters": {"sensor_name": params.get("sensor_name"),
-                                "sensor_name__in": params.get("sensor_name__in")}},
-        "columns": columns,
-        "data": data,
-        "column_details": details,
-        "meta": {"row_count": len(data), "deduplicated": True, "sorted": "timestamp_asc",
-                 "timezone": "UTC", "column_key_source": "canonical_db_fields",
-                 "column_key_pattern": "<sensor.name>__<timeseries.name>"},
-    }
 
 
 # ---- device resolution (shared by metadata and v2 measurements) ---------------------------
@@ -443,7 +379,6 @@ def measurements_raw(fixtures, params):
 ROUTES = [
     ("/api/v1/metadata", metadata, False),
     ("/api/v2/metadata", metadata_v2, False),
-    ("/api/v1/measurements", measurements, False),
     ("/api/v2/measurements/raw", measurements_raw, True),
 ]
 
@@ -501,7 +436,6 @@ def load_fixtures(fixtures_dir):
         # {timeseries id: [(datetime, time string, value), ...]}, ascending
         "measurements": {int(ts): sorted((_parse_time(when), when, value) for when, value in points)
                          for ts, points in raw.items()},
-        "measurements_v1": json.loads((d / "measurements_v1.json").read_text(encoding="utf-8")),
     }
 
 

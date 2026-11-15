@@ -31,7 +31,6 @@ import db_connector  # noqa: E402
 import fake_api  # noqa: E402
 
 FIXTURES = TESTS_DIR / "fixtures"
-DEVEUI = "feedbeefcafe0002"   # Mast 6 Tekbox (device 10), also the device of the v1 fixture
 
 
 class ApiTestCase(unittest.TestCase):
@@ -65,7 +64,7 @@ class ApiTestCase(unittest.TestCase):
 
     def api_requests(self, endpoint):
         """Query parameters of the requests to <endpoint>, a path suffix ("metadata": v1 and
-        v2, "v2/metadata", "measurements": v1, "measurements/raw")."""
+        v2, "v2/metadata", "measurements/raw")."""
         return [params for path, params in self.server.requests if path.endswith("/" + endpoint)]
 
 

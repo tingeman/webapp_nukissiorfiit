@@ -2,23 +2,22 @@ import os
 # os.environ["DASH_ASYNC_SUPPORT"] = "0"
 
 from flask import Flask, request
-from dash import Dash, Input, Output, callback, dcc, html
+from dash import Dash, Input, Output, State, callback, dcc, html, no_update
 import plotly.express as px
 import pandas as pd
-from influxdb_client import InfluxDBClient
 import dash_ag_grid as dag
 import ast
 import dash_bootstrap_components as dbc
 import datetime
+import re
+import traceback
 from datetime import datetime as dt
-from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
 
 import asyncio
 
 import db_connector
 
-import influx_test
 from config import settings
 DEBUG = settings.DEBUG
 #DEBUG = True
@@ -37,30 +36,14 @@ logger.info("app.py loaded")
 logger.info(f"DASH_ASYNC_SUPPORT: {os.environ.get('DASH_ASYNC_SUPPORT', 'Not set!')}")
 
 
-
-mastopt = ["Mast 6", "Mast 7", "Mast 9", "Mast 12", "Mast 13"]
-
-#Identify the requested mast
-
-# rename to device_eui
-codenamesformasts = ['feedbeefcafe0002',     #Mast6 has position 1 in list with options
-                    'feedbeefcafe0003',     #Mast7 has position 2 in list with options
-                    'feedbeefcafe0001',    #Mast9 has position 3 in list with options
-                    'feedbeefcafe0004',     #Mast12 has position 4 in list with options
-                    'feedbeefcafe0005']     #Mast13
-
-mast_dict = {'Mast 6': 'feedbeefcafe0002',
-             'Mast 7': 'feedbeefcafe0003',
-             'Mast 9': 'feedbeefcafe0001',
-             'Mast 12': 'feedbeefcafe0004',
-             'Mast 13': 'feedbeefcafe0005'}
-
-end_date = datetime.date.today()
-start_date = end_date - relativedelta(months=1)
+# Masts and loggers come from the API metadata (db_connector.mast_catalogue), loaded into the
+# "catalogue" store when the page loads. The default date range is the last DEFAULT_DAYS days
+# of the selected logger's data.
+DEFAULT_DAYS = 30
 
 
 server = Flask(__name__)
-app = Dash(__name__,                
+app = Dash(__name__,
            server=server,
            requests_pathname_prefix='/app/nuki/',
            routes_pathname_prefix='/app/nuki/')
@@ -68,6 +51,7 @@ app = Dash(__name__,
 
 app.layout = html.Div(
     [
+        dcc.Store(id="catalogue"),
         dbc.Row(dbc.Col(html.H1('Structural Health Monitoring Power Line Masts Kangerluarsuk Ungalleq'), width="auto")),
         html.H5("Select the date range (YYYY/MM/DD)"),
         dbc.Row([dbc.Col(html.Div(dcc.DatePickerRange(id='date-range-picker',
@@ -76,16 +60,12 @@ app.layout = html.Div(
                                              initial_visible_month=dt.now(),
                                              start_date_placeholder_text='Start Date',
                                              end_date_placeholder_text='End Date',
-                                             start_date=start_date,
-                                             end_date=end_date,
-                                             persistence=True,
-                                             persistence_type='session',
                                              display_format='YYYY/MM/DD',), className='dash-bootstrap'), width=3),
                  ]),
         html.H5("Mast"),
-        dcc.Dropdown(
-            id="mast", options=["Mast 6", "Mast 7", "Mast 9", "Mast 12", "Mast 13"]
-        ),
+        dcc.Dropdown(id="mast", options=[]),
+        html.H5("Logger"),
+        dcc.Dropdown(id="logger", options=[]),
         html.Br(),
         dbc.Row(dbc.Col(html.Div(id="graph"))),  # Placeholder for the graph
         dag.AgGrid(  # Placeholder for the table
@@ -101,192 +81,248 @@ app.layout = html.Div(
 )
 
 
+# ---- helpers without Dash or HTTP (unit-tested in tests/unit/test_app.py) ---------------------
+
+def error_message(exc, logger_name=""):
+    """The message shown in the graphs for an exception of a data request."""
+    if isinstance(exc, db_connector.QueryTimeout):
+        return "Backend request timed out"
+    if isinstance(exc, db_connector.EmptyQuerySet):
+        return "No data found for the given query"
+    if isinstance(exc, db_connector.RecordingDeviceNotFound):
+        return f"Recording device {logger_name} not found"
+    return "An unknown error occurred"
+
+
+def log_error(message, exc):
+    """Log a data error as before: with the traceback for unknown errors."""
+    if message == "An unknown error occurred":
+        logger.error(f"{message}: {exc}\n{traceback.format_exc()}")
+    else:
+        logger.error(f"{message}: {exc}")
+
+
+_LOGGER_LABEL = re.compile(r"^(?P<display>.*) \((?P<ident>[^()]*)\), ")
+
+
+def logger_short(lg):
+    """Short logger name for the titles: "<display name> <serial or deveui>", from the
+    catalogue label "<display name> (<serial or deveui>), <first> to <last>"."""
+    if not lg:
+        return ""
+    label = lg.get("label") or lg.get("value") or ""
+    m = _LOGGER_LABEL.match(label)
+    if m:
+        return f"{m.group('display')} {m.group('ident')}"
+    return label.split(",", 1)[0]
+
+
+def find_mast(catalogue, mast_name):
+    for mast in (catalogue or {}).get("masts") or []:
+        if mast["name"] == mast_name:
+            return mast
+    return None
+
+
+def find_logger(catalogue, logger_value):
+    """(mast, logger) of a logger value in the catalogue store, or (None, None)."""
+    for mast in (catalogue or {}).get("masts") or []:
+        for lg in mast["loggers"]:
+            if lg["value"] == logger_value:
+                return mast, lg
+    return None, None
+
+
+def date_range(lg, days=DEFAULT_DAYS):
+    """Date picker settings for a catalogue logger: the last ``days`` days of its data (not
+    before its first measurement), and its first and last dates as the limits.
+    Returns {"start_date", "end_date", "min_date_allowed", "max_date_allowed"} (YYYY-MM-DD)."""
+    first = datetime.date.fromisoformat(lg["first"][:10]) if lg.get("first") else None
+    last = datetime.date.fromisoformat(lg["last"][:10])
+    start = last - datetime.timedelta(days=days)
+    if first is not None and start < first:
+        start = first
+    return {
+        "start_date": start.isoformat(),
+        "end_date": last.isoformat(),
+        "min_date_allowed": (first or start).isoformat(),
+        "max_date_allowed": last.isoformat(),
+    }
+
+
+# (title, y label) of the six graphs, in page order
+GRAPHS = [
+    ("Battery Level", "Voltage (V)"),
+    ("Ground Temperature", "Temperature (°C)"),
+    ("Air Temperature", "Temperature (°C)"),
+    ("Relative Humidity", "Relative Humidity (%)"),
+    ("Barometric Pressure", "Pressure (kPa)"),
+    ("Inclination", "Inclination (deg)"),
+]
+
+
+def titled(title, where):
+    return f"{title} - {where}" if where else title
+
+
+def message_figures(message, where=""):
+    """The six graphs, each showing the same message."""
+    return [plot_no_values(message=message, ylabel=ylabel, title=titled(title, where))
+            for title, ylabel in GRAPHS]
+
+
+def _rows(frame):
+    # the rows where the selected series have data, as the v1 per-sensor queries returned them
+    # (one logger's frame has the times of all its sensors; the Campbell inclinometer is 6-hourly)
+    return frame.dropna(how="all")
+
+
+def _figure(data, where, title, ylabel, what, select, label=None, legend_title="Measurement"):
+    """One graph from a db_connector selection; EmptyQuerySet shows "No data found" in this
+    graph only. label: one legend name for every column (default: the selection's labels)."""
+    try:
+        frame, labels, *unit = select(data)
+    except db_connector.EmptyQuerySet as e:
+        message = f"No data found for the given {what} query"
+        logger.error(f"{message}: {e}")
+        return plot_no_values(message=message, ylabel=ylabel, title=titled(title, where))
+    if title == "Barometric Pressure":
+        ylabel = "Pressure (kPa)" if unit[0] == "kPa" else f"Pressure ({unit[0]})"
+    names = [label] * len(frame.columns) if label else labels
+    return plot_measures(_rows(frame), ylabel=ylabel, title=titled(title, where),
+                         label_names=names, legend_title=legend_title)
+
+
+def build_figures(data, where):
+    """The six figures (GRAPHS order) from a db_connector.LoggerData; ``where`` is the title
+    suffix, e.g. "Mast 6 (CR300_M6 12096)"."""
+    weather = lambda name: lambda d: db_connector.weather(d, name)  # noqa: E731
+    return [
+        _figure(data, where, "Battery Level", "Voltage (V)", "BatteryVoltage sensor",
+                db_connector.battery, label="Battery level"),
+        _figure(data, where, "Ground Temperature", "Temperature (°C)", "ground temperature sensor",
+                db_connector.ground_temperature, legend_title="Sensor Depths"),
+        _figure(data, where, "Air Temperature", "Temperature (°C)", "weather sensor",
+                weather("AirTemp"), label="Air Temperature"),
+        _figure(data, where, "Relative Humidity", "Relative Humidity (%)", "weather sensor",
+                weather("RelHum"), label="Relative Humidity"),
+        _figure(data, where, "Barometric Pressure", "Pressure (kPa)", "weather sensor",
+                weather("BarometricPressure"), label="Barometric Pressure"),
+        _figure(data, where, "Inclination", "Inclination (deg)", "inclination sensor",
+                db_connector.inclination),
+    ]
+
+
+def ground_temperature_table(data):
+    """(rowData, columnDefs) of the ground temperature table: one column per sensor (sensor
+    name, e.g. GroundTemp01), shallow to deep; no timestamps (as before; fixed in phase 2).
+    Empty when the logger has no ground temperatures."""
+    try:
+        frame, _labels = db_connector.ground_temperature(data)
+    except db_connector.EmptyQuerySet:
+        return [], []
+    frame = _rows(frame).rename(columns={k: data.columns[k].get("sensor_name") or k for k in frame.columns})
+    frame = frame.loc[:, ~frame.columns.duplicated()]
+    return frame.to_dict("records"), [{"field": c} for c in frame.columns]
+
+
+def layout_graphs(figs):
+    graphs = [dcc.Graph(figure=fig, className="border") for fig in figs]
+    rows = [dbc.Row([dbc.Col(g, lg=6),]) for g in graphs[:-1]]
+    rows.append(dbc.Row([dbc.Col(graphs[-1], lg=6),], className="mt-4"))
+    return rows
+
+
+# ---- callbacks --------------------------------------------------------------------------------
+# catalogue (page load) -> mast options and value -> logger options and value -> date range
+# -> data (one request set per update)
+
 @app.callback(
-    Output('date-range-picker', 'max_date_allowed'),
-    Input('date-range-picker', 'id')  # This input is just a placeholder to trigger the callback
+    [Output("catalogue", "data"), Output("mast", "options"), Output("mast", "value")],
+    Input("mast", "id"),  # This input is just a placeholder to trigger the callback at page load
 )
-def update_max_date_allowed(_):
-    return dt.combine(dt.now().date(), dt.max.time())
+async def load_catalogue(_):
+    """The mast catalogue into the store; the first mast is selected."""
+    try:
+        masts = await db_connector.mast_catalogue_async()
+    except Exception as e:
+        message = error_message(e)
+        log_error(message, e)
+        return {"masts": [], "error": f"Mast list not available: {message}"}, [], None
+    options = [{"label": m["name"], "value": m["name"]} for m in masts]
+    if not masts:
+        return {"masts": [], "error": "No masts found"}, [], None
+    return {"masts": masts, "error": None}, options, masts[0]["name"]
 
 
-#Still have to implement if the user want to change the date range, without changing the mast.
+@app.callback(
+    [Output("logger", "options"), Output("logger", "value")],
+    Input("mast", "value"),
+    State("catalogue", "data"),
+)
+def update_loggers(mast_name, catalogue):
+    """The loggers of the selected mast; the default is the one with the latest data."""
+    mast = find_mast(catalogue, mast_name)
+    if mast is None:
+        return [], None
+    options = [{"label": lg["label"], "value": lg["value"]} for lg in mast["loggers"]]
+    default = db_connector.default_logger(mast)
+    return options, (default["value"] if default else None)
+
+
+@app.callback(
+    [Output("date-range-picker", "start_date"), Output("date-range-picker", "end_date"),
+     Output("date-range-picker", "min_date_allowed"), Output("date-range-picker", "max_date_allowed"),
+     Output("date-range-picker", "initial_visible_month")],
+    Input("logger", "value"),
+    State("catalogue", "data"),
+)
+def update_date_range(logger_value, catalogue):
+    """The last 30 days of the selected logger's data, limited to its first..last dates."""
+    _mast, lg = find_logger(catalogue, logger_value)
+    if lg is None:
+        return no_update, no_update, no_update, no_update, no_update
+    r = date_range(lg)
+    return r["start_date"], r["end_date"], r["min_date_allowed"], r["max_date_allowed"], r["end_date"]
+
+
 @callback(
     [Output("graph", "children"), Output("table", "rowData"), Output("table", "columnDefs")],
-    [Input("mast", "value"), Input("date-range-picker", "start_date"),Input("date-range-picker", "end_date")], 
+    [Input("logger", "value"), Input("date-range-picker", "start_date"), Input("date-range-picker", "end_date"),
+     Input("catalogue", "data")],
 )
-
-async def get_data_from_measurement(mast, start_date, end_date):
+async def get_data_from_measurement(logger_value, start_date, end_date, catalogue):
     """Get data from the database and plot it"""
 
     # How do I get the IP address of the client sending the request?
     client_ip = request.remote_addr
     request_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    logger.debug(f"{request_time} - {client_ip} - Requesting # Mast: {mast}; Start Date: {start_date}; End Date: {end_date}")
+    logger.debug(f"{request_time} - {client_ip} - Requesting # Logger: {logger_value}; Start Date: {start_date}; End Date: {end_date}")
 
-    if mast is None:
-        mast = mastopt[0]
+    mast, lg = find_logger(catalogue, logger_value)
+    if lg is None:
+        message = (catalogue or {}).get("error") or "Select a mast and logger"
+        return layout_graphs(message_figures(message)), [], []
 
-    start = start_date
-    stop = end_date
-    
-    #Based on selection of mast in app, the associated dev_eui is selected below
-    dev_eui = mast_dict[mast]
-
-    ylabel = "Voltage (V)"
-    title = f"Battery Level - {mast}"
-    import traceback
+    short = logger_short(lg)
+    where = f"{mast['name']} ({short})"
     try:
-        df_batlev = await db_connector.get_sensor_data_async(dev_eui, "BatteryVoltage", start, stop)
-        fig_batlev = plot_measures(df_batlev, ylabel=ylabel, title=title, label_names="Battery level", legend_title="Measurement")
-    except db_connector.QueryTimeout as e:
-        message = "Backend request timed out for BatteryVoltage sensor query"
-        logger.error(f"{message}: {e}")
-        df_batlev = None
-        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
-    except db_connector.EmptyQuerySet as e:
-        message = "No data found for the given BatteryVoltage sensor query"
-        logger.error(f"{message}: {e}")
-        df_batlev = None
-        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
-    except db_connector.RecordingDeviceNotFound as e:
-        message = f"Recording device {dev_eui} not found"
-        logger.error(f"{message}: {e}")
-        df_batlev = None
-        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
+        data = await db_connector.get_logger_data_async(logger_value, start_date, end_date)
     except Exception as e:
-        message = "An unknown error occurred"
-        logger.error(f"{message}: {e}\n{traceback.format_exc()}")
-        df_batlev = None
-        fig_batlev = plot_no_values(message=message, ylabel=ylabel, title=title)
+        message = error_message(e, short)
+        log_error(message, e)
+        return layout_graphs(message_figures(message, where)), [], []
 
+    logging.debug(data.frame)
+    row_data, column_defs = ground_temperature_table(data)
+    return layout_graphs(build_figures(data, where)), row_data, column_defs
 
-    logging.debug(df_batlev)
-    
-
-    ylabel = "Temperature (°C)"
-    title = f"Ground Temperature - {mast}"
-    try:
-        df_gt, gt_dt_obj = await db_connector.get_ground_temp_async(dev_eui, start, stop)
-        sensor_depth_dict = await db_connector.get_ground_temp_sensor_depths_async(dev_eui)
-        fig_gt = plot_measures(df_gt, ylabel=ylabel, title=title, label_names=[f"{sensor_depth_dict[column]:+0.2f} m" for column in df_gt.columns], legend_title="Sensor Depths")
-    except db_connector.QueryTimeout as e:
-        message = "Backend request timed out for ground temperature sensor query"
-        logger.error(f"{message}: {e}")
-        df_gt = None
-        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
-    except db_connector.EmptyQuerySet as e:
-        message = "No data found for the given ground temperature sensor query"
-        logger.error(f"{message}: {e}")
-        df_gt = None
-        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
-    except db_connector.RecordingDeviceNotFound as e:
-        message = f"Recording device {dev_eui} not found"
-        logger.error(f"{message}: {e}")
-        df_gt = None
-        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
-    except Exception as e:
-        message = "An unknown error occurred"
-        logger.error(f"{message}: {e}")
-        df_gt = None
-        fig_gt = plot_no_values(message=message, ylabel=ylabel, title=title)
-
-
-    try:
-        df_weather = await db_connector.get_sensor_data_async(dev_eui, "Weather Sensor", start, stop)
-        fig_airtemp = plot_measures(df_weather[['AirTemp']], ylabel="Temperature (°C)", title=f"Air Temperature - {mast}", label_names=["Air Temperature"], legend_title="Measurement")
-        fig_rh = plot_measures(df_weather[['RelHum']], ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}", label_names=["Relative Humidity"], legend_title="Measurement")
-        fig_bp = plot_measures(df_weather[['BarometricPressure']], ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}", label_names=["Barometric Pressure"], legend_title="Measurement")
-    except db_connector.QueryTimeout as e:
-        message = "Backend request timed out for weather sensor query"
-        logger.error(f"{message}: {e}")
-        df_weather = None
-        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
-        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
-        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
-    except db_connector.EmptyQuerySet as e:
-        message = "No data found for the given weather sensor query"
-        logger.error(f"{message}: {e}")
-        df_weather = None
-        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
-        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
-        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
-    except db_connector.RecordingDeviceNotFound as e:
-        message = f"Recording device {dev_eui} not found"
-        logger.error(f"{message}: {e}")
-        df_weather = None
-        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
-        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
-        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
-    except Exception as e:
-        message = "An unknown error occurred"
-        logger.error(f"{message}: {e}")
-        df_weather = None
-        fig_airtemp = plot_no_values(message=message, ylabel="Temperature (°C)", title=f"Air Temperature - {mast}")
-        fig_rh = plot_no_values(message=message, ylabel="Relative Humidity (%)", title=f"Relative Humidity - {mast}")
-        fig_bp = plot_no_values(message=message, ylabel="Pressure (kPa)", title=f"Barometric Pressure - {mast}")
-
-
-    try:
-        df_incl = await db_connector.get_sensor_data_async(dev_eui, "Inclination Sensor", start, stop)
-        fig_incl = plot_measures(df_incl, ylabel="Inclination (deg)", title=f"Inclination - {mast}", legend_title="Measurement")
-    except db_connector.QueryTimeout as e:
-        message = "Backend request timed out for inclination sensor query"
-        logger.error(f"{message}: {e}")
-        df_incl = None
-        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
-    except db_connector.EmptyQuerySet as e:
-        message = "No data found for the given inclination sensor query"
-        logger.error(f"{message}: {e}")
-        df_incl = None
-        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
-    except db_connector.RecordingDeviceNotFound as e:
-        message = f"Recording device {dev_eui} not found"
-        logger.error(f"{message}: {e}")
-        df_incl = None
-        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
-    except Exception as e:
-        message = "An unknown error occurred"
-        logger.error(f"{message}: {e}")
-        df_incl = None
-        fig_incl = plot_no_values(message=message, ylabel="Inclination (deg)", title=f"Inclination - {mast}")
-
-
-    graph0 = dcc.Graph(figure=fig_batlev, className="border")
-    graph1 = dcc.Graph(figure=fig_gt, className="border")
-    graph2 = dcc.Graph(figure=fig_airtemp, className="border")
-    graph3 = dcc.Graph(figure=fig_rh, className="border")
-    graph4 = dcc.Graph(figure=fig_bp, className="border")
-    graph5 = dcc.Graph(figure=fig_incl, className="border")
-
-    all_graphs = [
-        dbc.Row([dbc.Col(graph0, lg=6),]),
-        dbc.Row([dbc.Col(graph1, lg=6),]),
-        dbc.Row([dbc.Col(graph2, lg=6),]),
-        dbc.Row([dbc.Col(graph3, lg=6),]),
-        dbc.Row([dbc.Col(graph4, lg=6),]),
-        dbc.Row([dbc.Col(graph5, lg=6),], className="mt-4"),
-        # dbc.Row([dbc.Col(graph1, lg=6), dbc.Col(graph2, lg=6)]),
-        # dbc.Row([dbc.Col(graph3, lg=6), dbc.Col(graph4, lg=6)]),
-        # dbc.Row([dbc.Col(graph5, lg=6)], className="mt-4"),
-    ]
-
-    # Prepare data for the table
-    if df_gt is not None:
-        row_data = df_gt.to_dict("records")
-        column_defs = [{"field": i} for i in df_gt.columns]
-    else:
-        row_data = []
-        column_defs = []
-
-
-    return all_graphs, row_data, column_defs
- 
 
 def plot_measures(df, ylabel="", title="", label_names=None, legend_title=""):
     """General plotting function
     Takes a dataframe and plots each column as a line on the same graph
     """
-    
+
     fig = go.Figure()
 
     for id, column in enumerate(df.columns):
@@ -317,7 +353,7 @@ def plot_measures(df, ylabel="", title="", label_names=None, legend_title=""):
 
 def plot_no_values(message="No data returned...", ylabel="", title=""):
     """Plot a message when no values are available"""
-    
+
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(

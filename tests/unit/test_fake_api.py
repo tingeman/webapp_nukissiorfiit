@@ -261,13 +261,6 @@ class ServerTest(StubTestCase):
         self.assertEqual(len(self.server.headers), 2)
         self.assertIn("host", self.server.headers[0])
 
-    def test_v1_measurements(self):
-        """the legacy v1 measurements endpoint still answers from measurements_v1.json"""
-        body = self.ok("/mdb/api/v1/measurements", deveui=TB6, sensor_name="Weather Sensor",
-                       start="2026-10-01T00:00:00Z", end="2026-10-01T23:59:59Z")
-        self.assertEqual(body["meta"]["row_count"], 3)
-        self.assertEqual(body["data"][0]["Weather Sensor__BarometricPressure"], 99.8)
-
 
 class FixtureTest(unittest.TestCase):
     def test_up_to_date(self):

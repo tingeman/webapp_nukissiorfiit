@@ -1,7 +1,0 @@
-{
-  "feedbeefcafe0002": [
-    {"timestamp": "2026-10-01T00:00:00Z", "BatteryVoltage__BatteryVoltage": 3.71, "GroundTemp01__Temperature": -1.5, "GroundTemp02__Temperature": -2.25, "GroundTemp03__Temperature": -3.0, "Inclination Sensor__InclX": 0.12, "Inclination Sensor__InclY": -0.04, "Weather Sensor__AirTemp": -8.4, "Weather Sensor__RelHum": 81.0, "Weather Sensor__BarometricPressure": 99.8},
-    {"timestamp": "2026-10-01T01:00:00Z", "BatteryVoltage__BatteryVoltage": 3.70, "GroundTemp01__Temperature": -1.6, "GroundTemp02__Temperature": -2.3, "GroundTemp03__Temperature": -3.05, "Inclination Sensor__InclX": 0.13, "Inclination Sensor__InclY": -0.05, "Weather Sensor__AirTemp": -8.9, "Weather Sensor__RelHum": 83.5, "Weather Sensor__BarometricPressure": 99.7},
-    {"timestamp": "2026-10-01T02:00:00Z", "BatteryVoltage__BatteryVoltage": 3.69, "GroundTemp01__Temperature": -1.7, "GroundTemp02__Temperature": -2.35, "GroundTemp03__Temperature": -3.1, "Inclination Sensor__InclX": 0.11, "Inclination Sensor__InclY": -0.06, "Weather Sensor__AirTemp": -9.2, "Weather Sensor__RelHum": 85.0, "Weather Sensor__BarometricPressure": 99.6}
-  ]
-}

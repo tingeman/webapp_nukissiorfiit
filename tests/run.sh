@@ -11,7 +11,8 @@
 #
 # * unit tests (tests/unit/test_*.py, names "unit: <module>: <description>"): app/db_connector.py
 #   (request building, date normalisation, error mapping 404/400/504/500, JSON -> DataFrame,
-#   the async wrappers) with the standard library's unittest, against the stub monitoring_db
+#   the async wrappers) and the page's helpers and callbacks in app/app.py, with the standard
+#   library's unittest, against the stub monitoring_db
 #   API (tests/fake_api.py, fixtures in tests/fixtures/) on 127.0.0.1. All of them run in ONE
 #   container of the image (--network none, as the image's user) through
 #   tests/unit/run_unit.py, which prints one PASS/FAIL line per unit test.
@@ -24,8 +25,9 @@
 #   an unreachable INFLUXDB_URL on a private --internal network, with the stub API (run with
 #   the image's python) as the backend in the production URL form
 #   (http://<host>/mdb/api/v1). It must become healthy (its own HEALTHCHECK), answer 200 on
-#   /app/nuki/, and the main Dash callback must return the figures built from the stub data
-#   (tests/smoke_check.py, run in the container). One app container for all smoke tests.
+#   /app/nuki/, and the Dash callbacks (mast list, loggers, date range, data) must return the
+#   masts, loggers and figures built from the stub data (tests/smoke_check.py, run in the
+#   container). One app container for all smoke tests.
 #
 # Nothing leaves the workstation: no real API, InfluxDB or secrets are used. All containers
 # have names starting with a unique prefix and are removed at the end, together with the
@@ -72,7 +74,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "image not found: $IMAGE
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$TESTS_DIR/.." && pwd)"
-for f in fake_api.py smoke_check.py unit/run_unit.py fixtures/metadata.json fixtures/measurements_v1.json fixtures/measurements_v2.json; do
+for f in fake_api.py smoke_check.py unit/run_unit.py fixtures/metadata.json fixtures/measurements_v2.json; do
   [ -f "$TESTS_DIR/$f" ] || { echo "missing $TESTS_DIR/$f" >&2; exit 2; }
 done
 APP_SRC="${APP_SRC:-}"
@@ -363,7 +365,7 @@ needs app
 add_test --slow "smoke: app with unreachable InfluxDB starts and becomes healthy" t_smoke_healthy
 add_test --slow "smoke: gunicorn is PID 1 as uid 30000, without --reload" t_smoke_process
 add_test --slow "smoke: GET /app/nuki/ returns 200 with the Dash page" t_smoke_index
-add_test --slow "smoke: Dash callback returns the figures and table built from the stub API data" t_smoke_callback
+add_test --slow "smoke: Dash callbacks return the masts, loggers, figures and table built from the stub API data" t_smoke_callback
 add_test --slow "smoke: app log has no traceback or data error" t_smoke_log
 
 # Selection: one grep over all names (line numbers of the matching names)
