@@ -69,7 +69,7 @@ It clones the tag, runs `tests/run.sh` (103 tests) and writes the bundle to dtu_
 2. In `ansible/vars/releases.yml`, `webapp_nuki`: `version` and `tarball_sha256` from the manifest in `release-out/webapp_nuki/`, and update the comment. Commit.
 3. From `ansible/`: `ansible-playbook -kK -i hosts playbook_install_webapp_nuki.yml -v --ask-vault-pass`.
 4. Check `https://arctic.sustain.dtu.dk/app/nuki/`: masts, loggers, a Campbell and a Tekbox logger.
-5. Fast-forward `main` to the deployed tag: `git fetch . 2026.2:main && git push origin main` (in this repository).
+5. Fast-forward `main` to the deployed tag (in this repository; the check makes sure it is a fast-forward): `git merge-base --is-ancestor main 2026.2 && git branch -f main '2026.2^{commit}' && git push origin main develop/main`. `develop/main` is one commit ahead of the tag (the Dockerfile fix `5359623`, not in 2026.2 and not needed there); push it too.
 
 No env change is needed: the `/api/v1` form of `BACKEND_API_BASE_URL` keeps working (one WARNING at start), and the new variables have defaults. Optional, at the next edit of the production env file: the root form `http://<data02-host>/mdb`.
 
