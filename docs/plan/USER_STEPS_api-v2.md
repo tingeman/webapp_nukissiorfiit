@@ -40,11 +40,37 @@ cd .. && git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phas
 
 Independent of the phase 2 work (other branch; the release builds from GitHub, not from this checkout).
 
-1. Push and fast-forward: `git push origin agent-api-v2` (now includes `655aa0a`, "Backend not reachable"; your running dev app in `webapp_nuki_phase1` has reloaded with it, so you can check it by stopping `mdb-nginx-service` again), then fast-forward `develop/main` to `agent-api-v2` (or tell the agent "fast-forward develop/main to agent-api-v2"; it then does only that merge, the push stays yours).
-2. Tag on `develop/main` and push the tag.
-3. In dtu_sus_data02: `scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git <tag>`.
-4. In dtu_sus_web_server: set the version in `ansible/vars/releases.yml`, deploy with its playbook.
-5. Optional, at the next edit of the production env file: `BACKEND_API_BASE_URL` in the root form (`http://<data02-host>/mdb`); the `/api/v1` form keeps working.
+The "Backend not reachable" fix (`655aa0a`) is already on `agent-api-v2`, so it ships with this release; nothing extra to do. The release is built from GitHub, so everything must be pushed first.
+
+**a. Git (Git Bash, in either checkout; both share one repository, no branch switch needed):**
+
+```bash
+cd /c/thin/02_Code/python_web_apps/webapp_nukissiorfiit
+git fetch origin                                   # check origin/develop/main is still 1ef45c7 (tag 2026.1)
+git log --oneline -1 origin/develop/main
+git fetch . agent-api-v2:develop/main              # fast-forward local develop/main (refuses if not a fast-forward)
+git tag -a 2026.2 develop/main -m "Phase 1: API v2 data access, logger selector"
+git push origin agent-api-v2 develop/main 2026.2
+```
+
+(`2026.2` follows `2026.1`; pick another name if you prefer.)
+
+**b. Build and test (WSL, in dtu_sus_data02):**
+
+```bash
+scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git 2026.2
+```
+
+It clones the tag, runs `tests/run.sh` (103 tests) and writes the bundle to `release-out/webapp_nuki/`.
+
+**c. Deploy (dtu_sus_web_server, `docs/deploy/releases.md`):**
+
+1. Publish the bundle files to the releases share (`...\SUS-PArcWeb01\releases\webapp_nuki\`).
+2. In `ansible/vars/releases.yml`, `webapp_nuki`: `version` and `tarball_sha256` from the manifest in `release-out/webapp_nuki/`, and update the comment. Commit.
+3. From `ansible/`: `ansible-playbook -kK -i hosts playbook_install_webapp_nuki.yml -v --ask-vault-pass`.
+4. Check `https://arctic.sustain.dtu.dk/app/nuki/`: masts, loggers, a Campbell and a Tekbox logger.
+
+No env change is needed: the `/api/v1` form of `BACKEND_API_BASE_URL` keeps working (one WARNING at start), and the new variables have defaults. Optional, at the next edit of the production env file: the root form `http://<data02-host>/mdb`.
 
 ## 3. nginx timeout 120 s (can run in parallel; needed before step 5)
 
