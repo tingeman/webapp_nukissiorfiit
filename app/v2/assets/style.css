@@ -140,3 +140,10 @@ body {
 .nuki-profile-note:empty { display: none; }
 /* room below the slider for its always-visible date tooltip */
 .nuki-profile-slider { padding: 0.25rem 0.5rem 2.2rem; }
+
+/* ---- download (T12) --------------------------------------------------------------------- */
+.nuki-download-intro { color: var(--nuki-muted); font-size: 0.9rem; margin-bottom: 0.75rem; }
+.nuki-download-loggers .form-check { margin-bottom: 0.15rem; }
+.nuki-download-message { font-size: 0.9rem; }
+.nuki-download-message .alert { margin-bottom: 0; padding: 0.4rem 0.75rem; }
+.nuki-download-all { font-weight: 600; margin-bottom: 0.15rem; }

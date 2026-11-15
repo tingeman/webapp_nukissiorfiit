@@ -26,6 +26,11 @@ tests/run.sh (docker exec <app> python /tests/smoke_check.py <check>), against t
              on the data figure), and "All loggers" of Mast 6 in Daily (the dropdown's last
              option, the period over both loggers, one line per depth over both, a dashed
              line at the logger change)
+  v2download POST /app/nuki/v2/_dash-update-component for the download card: the checklists
+             of Mast 6 (both loggers and "All" ticked), the year dropdowns (2026..2026) and the
+             button (All, 2026): dcc.send_bytes data of nuki_Mast_6_2026-2026.xlsx that opens
+             with openpyxl, with the Info sheet and a full and a daily sheet per logger (33
+             and 5 data rows)
 """
 import base64
 import json
@@ -33,6 +38,8 @@ import re
 import sys
 import urllib.error
 import urllib.request
+
+import io
 
 import numpy as np
 
@@ -363,7 +370,50 @@ def check_v2_callback():
           f"one change marker")
 
 
+V2_SHEETS = ["Info", "Tekbox_TBSL1_3 cafe0002 full", "Tekbox_TBSL1_3 cafe0002 daily",
+             "CR300_M6 (12096) full", "CR300_M6 (12096) daily"]
+
+
+def check_v2_download():
+    import openpyxl     # in the image (app/requirements.in)
+
+    r = v2_call([("masts", "data"), ("mast", "options"), ("mast", "value"), ("masts-message", "children")],
+                [("url", "pathname", "/app/nuki/v2/")])
+    masts = r["masts"]["data"]
+    r = v2_call([("download-loggers", "options"), ("download-loggers", "value"), ("download-all", "value")],
+                [("mast", "value", "Mast 6"), ("download-all", "value", []), ("download-loggers", "value", [])],
+                state=[("masts", "data", masts)])
+    ticked = r["download-loggers"]["value"]
+    if ticked != [TEKBOX_M6, CAMPBELL_M6] or r["download-all"]["value"] != ["all"]:
+        fail(f"v2 download checklists: {r}")
+    r = v2_call([("download-from", "options"), ("download-from", "value"), ("download-to", "options"),
+                 ("download-to", "value")], [("download-loggers", "value", ticked)],
+                state=[("mast", "value", "Mast 6"), ("masts", "data", masts)])
+    years = (r["download-from"]["value"], r["download-to"]["value"])
+    if years != (2026, 2026):
+        fail(f"v2 download years: {r}")
+    r = v2_call([("download-file", "data"), ("download-message", "children")], [("download-button", "n_clicks", 1)],
+                state=[("mast", "value", "Mast 6"), ("download-loggers", "value", ticked),
+                       ("download-from", "value", years[0]), ("download-to", "value", years[1]),
+                       ("masts", "data", masts)])
+    data = r.get("download-file", {}).get("data") or {}
+    if data.get("filename") != "nuki_Mast_6_2026-2026.xlsx" or not data.get("base64"):
+        fail(f"v2 download: {json.dumps(r)[:300]}")
+    content = base64.b64decode(data["content"])
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
+    except Exception as e:      # noqa: BLE001 - any problem opening it fails the check
+        fail(f"v2 download: the xlsx does not open: {type(e).__name__}: {e}")
+    if wb.sheetnames != V2_SHEETS:
+        fail(f"v2 download: sheets {wb.sheetnames}")
+    n = [sum(1 for _ in wb[name].iter_rows()) - 1 for name in V2_SHEETS[1:]]
+    if n != [33, 5, 33, 5]:
+        fail(f"v2 download: data rows {n}, expected [33, 5, 33, 5]")
+    print(f"OK v2 download: Mast 6, All, 2026: {data['filename']}, {len(content)} bytes, sheets {V2_SHEETS}, "
+          f"data rows {n}")
+
+
 if __name__ == "__main__":
     {"index": check_index, "v2index": check_v2_index, "callback": check_callback,
-     "v2callback": check_v2_callback}.get(
+     "v2callback": check_v2_callback, "v2download": check_v2_download}.get(
         sys.argv[1] if len(sys.argv) > 1 else "", lambda: fail(__doc__))()

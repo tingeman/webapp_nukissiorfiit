@@ -125,3 +125,55 @@ API_ERROR = "The data service answered with an error: {detail}"
 API_INVALID = "The data service sent an answer that cannot be read. Please try again later."
 # the download's time budget (DOWNLOAD_TIME_BUDGET_S) ran out before all requests were started
 DOWNLOAD_TOO_LARGE = "Download too large; choose fewer years or loggers"
+
+# ---- download (T12) -------------------------------------------------------------------------
+DOWNLOAD_TITLE = "Download"
+DOWNLOAD_INTRO = ("An Excel workbook with every measurement (one \"full\" sheet per logger) and "
+                  "the daily mean, minimum, maximum and count (one \"daily\" sheet per logger) "
+                  "of the chosen loggers and calendar years (UTC). Large downloads take a while.")
+DOWNLOAD_FROM = "From year"
+DOWNLOAD_TO = "To year"
+DOWNLOAD_LOGGERS = "Loggers"
+DOWNLOAD_ALL = "All"
+DOWNLOAD_BUTTON = "Download Excel file"
+DOWNLOAD_RUNNING = "Preparing the file..."
+DOWNLOAD_CHOOSE_YEARS = "Choose the years to download."
+DOWNLOAD_YEARS_REVERSED = "The first year is after the last year."
+DOWNLOAD_CHOOSE_LOGGERS = "Choose at least one logger to download."
+DOWNLOAD_NO_DATA = "The chosen loggers have no data from {start} to {end}."
+# the message after a download: {filename}, {size} e.g. "120 KB"
+DOWNLOAD_DONE = "Downloaded {filename} ({size})."
+
+# ---- the workbook (download.py) --------------------------------------------------------------
+XLSX_TITLE = "Nukissiorfiit monitoring stations: data export (DTU Sustain)"
+XLSX_MAST = "Mast"
+XLSX_YEARS = "Requested years"
+XLSX_YEARS_VALUE = "{start} to {end} (calendar years, UTC)"
+XLSX_DOWNLOADED = "Downloaded (UTC)"
+XLSX_SOURCE = "Source"
+XLSX_SOURCE_VALUE = ("DTU Sustain monitoring database, read API v2 (/measurements/raw and "
+                     "/measurements/daily), with the API's defaults: calibrated values, masked "
+                     "values left out")
+XLSX_NOTE = "Note"
+XLSX_NOTES = (
+    "All times are UTC (Excel datetimes without a time zone); daily values are per UTC day.",
+    "Values are in the units stored in the database (column details below). Unlike the web "
+    "page, barometric pressure is not converted to kPa.",
+    "Daily sheets: mean, minimum, maximum and number of measurements per day, as computed "
+    "by the API (the same numbers as the web page's Daily view).",
+)
+XLSX_LOGGERS = "Loggers"
+XLSX_LOGGER_HEADERS = ("Logger", "Label", "Selector", "Station", "First measurement (UTC)",
+                       "Last measurement (UTC)", "Days exported (UTC)", "Sheets")
+XLSX_DAYS = "{start} to {end}"
+XLSX_NOT_EXPORTED = "no data in the requested years (not exported)"
+XLSX_COLUMNS = "Column details"
+XLSX_COLUMN_HEADERS = ("Sheet", "Column", "Header", "Sensor", "Series", "Unit",
+                       "Depth / relative_z (m)", "Datatype", "Sensor type", "API key", "Note")
+XLSX_TIME = "Time (UTC)"
+XLSX_DATE = "Date (UTC)"
+XLSX_TIME_NOTE = "Measurement time, UTC"
+XLSX_DATE_NOTE = "UTC day"
+XLSX_STAT = {"mean": "Daily mean.", "min": "Daily minimum.", "max": "Daily maximum.",
+             "count": "Number of measurements of the day."}
+XLSX_NOTE_PRESSURE = "In {unit} as stored (not converted to kPa)."

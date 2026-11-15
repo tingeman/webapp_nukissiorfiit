@@ -27,7 +27,16 @@ Component ids (used by callbacks.py and the tests):
     profile-label    the chosen day and the annual envelope's window
     profile-graph    temperature against depth of the chosen day
 
-Room for the next task: the download (T12), a card of its own after the profile.
+    download-from, download-to  first and last calendar year of the download (dropdowns;
+                     options and default: the first..last year with data of the loggers
+                     ticked in download-loggers)
+    download-all     checklist with the one option "All" (value "all"), above download-loggers;
+                     ticking it ticks every logger, unticking it none; it is ticked exactly
+                     when every logger is
+    download-loggers checklist of the mast's loggers; default all; reset when the mast changes
+    download-button  starts the download; disabled while one runs
+    download-message what the last download did (a problem, or the file's name and size)
+    download-file    dcc.Download that hands the .xlsx to the browser
 """
 import dash_bootstrap_components as dbc
 from dash import dcc, html
@@ -98,6 +107,31 @@ def profile_section():
     ]), className="nuki-card mb-3")
 
 
+def download_section():
+    return dbc.Card(dbc.CardBody([
+        html.Div(texts.DOWNLOAD_TITLE, className="nuki-card-title"),
+        html.P(texts.DOWNLOAD_INTRO, className="nuki-download-intro"),
+        dbc.Row([
+            _field(texts.DOWNLOAD_FROM, dcc.Dropdown(id="download-from", options=[], clearable=False),
+                   xs=6, md=3, xl=2),
+            _field(texts.DOWNLOAD_TO, dcc.Dropdown(id="download-to", options=[], clearable=False),
+                   xs=6, md=3, xl=2),
+            _field(texts.DOWNLOAD_LOGGERS, html.Div([
+                dbc.Checklist(id="download-all", options=[{"label": texts.DOWNLOAD_ALL, "value": "all"}],
+                              value=["all"], className="nuki-download-all"),
+                dbc.Checklist(id="download-loggers", options=[], value=[],
+                              className="nuki-download-loggers"),
+            ]), xs=12, md=6, xl=8),
+        ], className="g-3 mb-3"),
+        html.Div([
+            dbc.Button(texts.DOWNLOAD_BUTTON, id="download-button", color="primary", n_clicks=0,
+                       className="me-3"),
+            html.Div(id="download-message", className="nuki-download-message"),
+        ], className="d-flex flex-wrap align-items-center gap-2"),
+        dcc.Download(id="download-file"),
+    ]), className="nuki-card mb-3")
+
+
 def build(classic_url):
     """The page. ``classic_url`` is the absolute path of the classic page; a plain link (full
     page load), since the classic page is another Dash app."""
@@ -122,7 +156,7 @@ def build(classic_url):
             html.Div(id="message"),
             figure_section(),
             profile_section(),
-            # T12: the download card here
+            download_section(),
             html.Footer(texts.FOOTER, className="nuki-footer"),
         ], fluid="xl", className="nuki-main"),
     ])

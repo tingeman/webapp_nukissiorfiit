@@ -44,6 +44,16 @@ Data flow (requests per action in the plan, "Phase 2 design"):
    zoom refetches /raw for the window per logger with data in it. The ``profile`` store comes
    from the joined ground temperatures (profile.for_day picks one station per day).
 
+8. Download (T12, download.py): its own selectors. Mast -> the download checklist (the mast's
+   loggers, all ticked, and "All" ticked); "All" ticks every logger or none, and is ticked
+   exactly when every logger is. The ticked loggers -> the year dropdowns (options and
+   default: their first..last year with data; reset on every change of the ticks). The
+   button -> download.export: per ticked logger with data in the years, one after the other,
+   /raw (its chunks at most max_parallel at once) then /daily of those days, under the time
+   budget DOWNLOAD_TIME_BUDGET_S; the .xlsx goes to dcc.Download (dcc.send_bytes). The
+   button is disabled while the download runs (``running=``). Problems (ApiError, also the
+   used-up budget, or nothing to export) are shown next to the button.
+
 Problems end up as an alert on the page (``str(ApiError)``, texts.py) and one log line,
 never as a traceback on the page.
 """
@@ -56,9 +66,9 @@ import time
 import uuid
 
 import dash_bootstrap_components as dbc
-from dash import Input, Output, Patch, State, html, no_update
+from dash import Input, Output, Patch, State, ctx, dcc, html, no_update
 
-from . import api_client, figures, join, profile, texts
+from . import api_client, download, figures, join, profile, texts
 
 logger = logging.getLogger("nuki.v2")
 
@@ -537,10 +547,66 @@ def profile_draw(day_value, envelope, store):
     return fig, profile_label(p, annual, store, station), marker
 
 
+# ---- download (T12) ---------------------------------------------------------------------------
+
+XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+DOWNLOAD_ALL = "all"
+
+
+def download_ticks(trigger, mast, all_value, values):
+    """(logger options, ticked logger values, "All" value) of the download checklists after
+    ``trigger`` changed ("download-all", "download-loggers", else the mast: reset to all)."""
+    if mast is None:
+        return [], [], []
+    options = [{"label": lg["label"], "value": lg["value"]} for lg in mast["loggers"]]
+    every = [o["value"] for o in options]
+    if trigger == "download-all":
+        ticked = every if DOWNLOAD_ALL in (all_value or []) else []
+    elif trigger == "download-loggers":
+        ticked = [v for v in every if v in (values or [])]
+    else:
+        ticked = every
+    return options, ticked, [DOWNLOAD_ALL] if every and len(ticked) == len(every) else []
+
+
+def download_years(mast, values):
+    """(year options, from year, to year) of the ticked loggers: their first..last year with
+    data, default the whole span; ([], None, None) without data."""
+    ticked = [lg for lg in (mast or {}).get("loggers", []) if lg["value"] in (values or [])]
+    span = download.year_span(ticked)
+    if span is None:
+        return [], None, None
+    return [{"label": str(y), "value": y} for y in range(span[0], span[1] + 1)], span[0], span[1]
+
+
+def download_file(client: api_client.Client, masts, mast_name, values, from_year, to_year,
+                  budget_s: float, now=None):
+    """(dcc.Download data or no_update, message) of a click on the download button."""
+    mast = find_mast(masts, mast_name)
+    if mast is None:
+        return no_update, _alert(texts.CHOOSE_FIRST, "warning")
+    try:
+        result = download.export(client, mast, values, from_year, to_year, budget_s, now)
+    except download.DownloadError as e:
+        return no_update, _alert(str(e), "warning")
+    except api_client.ApiError as e:        # the client logged it
+        return no_update, _alert(str(e), "danger")
+    return (dcc.send_bytes(result.content, result.filename, type=XLSX_TYPE),
+            texts.DOWNLOAD_DONE.format(filename=result.filename, size=size_text(len(result.content))))
+
+
 # ---- registration -----------------------------------------------------------------------------
 
-def register(app, client: api_client.Client):
-    """Register the page's callbacks on ``app`` (the v2 Dash instance), using ``client``."""
+def register(app, client: api_client.Client, download_budget_s: float | None = None):
+    """Register the page's callbacks on ``app`` (the v2 Dash instance), using ``client``.
+    ``download_budget_s``: the download's time budget (default: DOWNLOAD_TIME_BUDGET_S of
+    config.settings, read at each download)."""
+
+    def budget() -> float:
+        if download_budget_s is not None:
+            return download_budget_s
+        import config       # app/config.py (top-level module)
+        return config.settings.download_time_budget_s
 
     @app.callback(
         Output("masts", "data"),
@@ -664,5 +730,50 @@ def register(app, client: api_client.Client):
         if r is None:
             return figures.empty_figure("", figures.PROFILE_HEIGHT), None, no_update
         return r
+
+    @app.callback(
+        Output("download-loggers", "options"),
+        Output("download-loggers", "value"),
+        Output("download-all", "value"),
+        Input("mast", "value"),
+        Input("download-all", "value"),
+        Input("download-loggers", "value"),
+        State("masts", "data"),
+    )
+    def tick_download_loggers(mast_name, all_value, values, masts):
+        return download_ticks(ctx.triggered_id, find_mast(masts, mast_name), all_value, values)
+
+    @app.callback(
+        Output("download-from", "options"),
+        Output("download-from", "value"),
+        Output("download-to", "options"),
+        Output("download-to", "value"),
+        Input("download-loggers", "value"),
+        State("mast", "value"),
+        State("masts", "data"),
+    )
+    def set_download_years(values, mast_name, masts):
+        options, first, last = download_years(find_mast(masts, mast_name), values)
+        return options, first, options, last
+
+    @app.callback(
+        Output("download-file", "data"),
+        Output("download-message", "children"),
+        Input("download-button", "n_clicks"),
+        State("mast", "value"),
+        State("download-loggers", "value"),
+        State("download-from", "value"),
+        State("download-to", "value"),
+        State("masts", "data"),
+        running=[(Output("download-button", "disabled"), True, False),
+                 (Output("download-button", "children"), texts.DOWNLOAD_RUNNING, texts.DOWNLOAD_BUTTON)],
+        prevent_initial_call=True,
+    )
+    def make_download(_clicks, mast_name, values, from_year, to_year, masts):
+        try:
+            return download_file(client, masts, mast_name, values, from_year, to_year, budget())
+        except Exception:   # a bug or an unexpected payload: message, log, page stays usable
+            logger.exception("v2 download %s %s-%s %s failed", mast_name, from_year, to_year, values)
+            return no_update, _alert(texts.UNEXPECTED, "danger")
 
     return app

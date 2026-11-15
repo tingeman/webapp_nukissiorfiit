@@ -28,8 +28,9 @@
 #   (http://<host>/mdb/api/v1). It must become healthy (its own HEALTHCHECK), answer 200 on
 #   /app/nuki/ and on /app/nuki/v2/ (the phase 2 page, app/v2/), and the Dash callbacks (mast
 #   list, loggers, date range, data) of the classic page and of the phase 2 page (masts,
-#   loggers, period, Daily and Full figure, zoom) must return the masts, loggers and figures
-#   built from the stub data (tests/smoke_check.py, run in the container). One app container
+#   loggers, period, Daily and Full figure, zoom, the Excel download) must return the masts,
+#   loggers, figures and the workbook built from the stub data (tests/smoke_check.py, run in
+#   the container). One app container
 #   for all smoke tests.
 #
 # Nothing leaves the workstation: no real API, InfluxDB or secrets are used. All containers
@@ -218,7 +219,7 @@ img_setup() {
     emit uid id -u
     emit user id -un
     emit pipcheck python -m pip check
-    emit imports python -c "import dash, dash_bootstrap_components, dash_ag_grid, plotly, pandas, flask, werkzeug, gunicorn, asgiref, pydantic, pydantic_settings, dotenv, requests, influxdb_client, matplotlib, kaleido"
+    emit imports python -c "import dash, dash_bootstrap_components, dash_ag_grid, plotly, pandas, flask, werkzeug, gunicorn, asgiref, pydantic, pydantic_settings, dotenv, requests, influxdb_client, matplotlib, kaleido, openpyxl"
     emit ipython python -c "import IPython"
     emit ipdb python -c "import ipdb"
   ' 2>&1)" || true
@@ -297,7 +298,8 @@ app_setup() {
       emit index python /tests/smoke_check.py index
       emit v2index python /tests/smoke_check.py v2index
       emit callback python /tests/smoke_check.py callback
-      emit v2callback python /tests/smoke_check.py v2callback' 2>&1 || true
+      emit v2callback python /tests/smoke_check.py v2callback
+      emit v2download python /tests/smoke_check.py v2download' 2>&1 || true
     docker logs "$APP" 2>&1 | sed 's/^/log.out /'
   ) 2>&1)"
 }
@@ -335,6 +337,11 @@ t_smoke_callback() {
 t_smoke_v2_callback() {
   need_app
   expect "v2 callback (${F[app.v2callback.out]:-})" "${F[app.v2callback.rc]:-}" "0"
+}
+
+t_smoke_v2_download() {
+  need_app
+  expect "v2 download (${F[app.v2download.out]:-})" "${F[app.v2download.rc]:-}" "0"
 }
 
 t_smoke_log() {
@@ -383,6 +390,7 @@ add_test --slow "smoke: GET /app/nuki/ returns 200 with the Dash page" t_smoke_i
 add_test --slow "smoke: GET /app/nuki/v2/ returns 200 with the phase 2 Dash page" t_smoke_v2_index
 add_test --slow "smoke: Dash callbacks return the masts, loggers, figures and table built from the stub API data" t_smoke_callback
 add_test --slow "smoke: phase 2 page callbacks return the masts, loggers, period, Daily and Full figures and a zoom patch from the stub API data" t_smoke_v2_callback
+add_test --slow "smoke: phase 2 download of Mast 6, All loggers, returns an xlsx that opens with the Info, full and daily sheets" t_smoke_v2_download
 add_test --slow "smoke: app log has no traceback or data error" t_smoke_log
 
 # Selection: one grep over all names (line numbers of the matching names)
