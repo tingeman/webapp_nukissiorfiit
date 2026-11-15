@@ -18,7 +18,7 @@ Planned work for the app. Each item says where it came from.
 Reference implementation for R2: `webapp_grl_tsp` (`app/api_client.py`: chunked, parallel, error
 mapping; `app/rawseries.py`: raw data thinned for plotting).
 
-## Phase 2: page aligned with webapp_grl_tsp (in PLAN_api-v2, tasks T7-T13)
+## Phase 2: page aligned with webapp_grl_tsp (in PLAN_api-v2, tasks T7-T15)
 
 | # | Item | Why | Source |
 |---|---|---|---|
