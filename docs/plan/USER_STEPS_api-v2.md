@@ -113,7 +113,7 @@ git -C webapp_nukissiorfiit worktree remove --force ../webapp_nuki_phase1   # --
 
 ## 3. nginx timeout 120 s (needed before step 5.4)
 
-- [ ] Done (= dtu_sus_web_server steps 6 and 7 ticked there)
+- [x] Done 2026-11-15 (dtu_sus_web_server steps 4, 6, 7; nginx timeout live)
 
 `proxy_read_timeout 120s` for `/app/nuki/` is merged in dtu_sus_web_server (`a603fbe`) but not live: the nuki playbook does not reload nginx. Everything happens in dtu_sus_web_server: open `C:\thin\02_Code\docker_projects\dtu_sus_web_server\docs\plan\USER_STEPS_api-v2.md` and do step 6 (deploy nginx) and step 7 (its step 4 is optional). Nothing to do in this repo.
 
