@@ -13,9 +13,9 @@ Plan drafted 2026-11-15, waiting for approval. Next: create `agent-api-v2` from 
 - Phase 2: default mode of the Daily/Full switch, and the threshold (to decide in the phase 2 planning session).
 - monitoring_db: a site/group field for masts, and the inclinometer mounting orientation (plan, "Notes on the sensor definitions").
 
-- Phase 2 side by side with phase 1 (requirement 2026-11-15): proposed second Dash app at `/app/nuki/next/` with links both ways, switch-over T14 (plan, Phase 2 outline). Confirm the path and the link texts.
-
 ## Notes for the next session
+
+- Phase 2 runs side by side with phase 1: a second Dash app at `/app/nuki/v2/` with links both ways, switch-over T14 (decided 2026-11-15). Phase 1 is released on its own when ready (T6). Phase 2 development (T7+) may start before T6 is deployed.
 
 - Decisions 2026-11-15: logger dropdown (default: the latest logger), always `/raw` in phase 1 (chunked, at most 2 in parallel), inclination selected by datatype `Angle`, keep `BACKEND_API_BASE_URL` and strip `/api/v1`.
 - Stations shown: only identifiers fully matching `NUKI_STATION_PATTERN`, default `^(SIS2024-0[1-5]|NUKI202[0-9]-.+)$` (decision 2026-11-15).

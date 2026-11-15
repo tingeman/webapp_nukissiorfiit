@@ -75,9 +75,9 @@ Always raw (user decision 2026-11-15): a 2-year range of one logger is about 17 
 
 ### Phase 2 outline (refined in its own planning session before T7)
 
-**Side by side with phase 1 (user requirement 2026-11-15).** The phase 1 page stays until you decide to switch, and users can move between the two pages. Proposed (to confirm in the phase 2 session):
+**Side by side with phase 1 (user requirement 2026-11-15).** The phase 1 page stays until you decide to switch, and users can move between the two pages. Decided 2026-11-15 (path `/app/nuki/v2/` chosen by you):
 
-- Phase 2 is a second `Dash` instance on the same Flask `server`, in its own package (`app/next/`), at `/app/nuki/next/`. Phase 1 stays at `/app/nuki/` unchanged. Each page has a link to the other ("Try the new page" / "Back to the classic page").
+- Phase 2 is a second `Dash` instance on the same Flask `server`, in its own package (`app/v2/`), at `/app/nuki/v2/`. Phase 1 stays at `/app/nuki/` unchanged. Each page has a link to the other ("Try the new page" / "Back to the classic page").
 - No deployment change: nginx's `location /app/nuki/` already proxies the sub-path, and the port, healthcheck (`/app/nuki/`) and env are unchanged. Separate Dash instances keep component IDs and callbacks apart.
 - Shared: `config.py` and the API data access (phase 1's `db_connector` catalogue, metadata cache and chunked raw fetch; phase 2 adds `/daily`). Phase 2 must not change phase 1's behaviour; phase 1's tests keep running.
 - The switch-over is its own task (T14, after your decision): swap the routes (new page at `/app/nuki/`, classic at `/app/nuki/classic/` for a while or removed), then remove the classic page as a separate change.
@@ -132,9 +132,11 @@ Taken from the TSP app: module split (`layout.py`, `callbacks.py`, `figures.py`,
 ### T6. Release phase 1 (you)
 - Fast-forward `develop/main` to the approved branch (with your permission), tag, then in dtu_sus_data02: `scripts/build_image.sh webapp_nuki https://github.com/tingeman/webapp_nukissiorfiit.git <tag>`; set the version in `dtu_sus_web_server/ansible/vars/releases.yml` and deploy with its playbook.
 
-### Phase 2 (tasks refined in a planning session after T6; the list is the intended scope)
+### Phase 2 (tasks refined in a planning session; the list is the intended scope)
 
-- **T7.** New page skeleton in `app/next/` (`layout.py`, `callbacks.py`, `figures.py`, `texts.py`, TSP structure), mounted at `/app/nuki/next/` on the same server, with links between the two pages. Phase 1's `app.py` stays as it is (only the link is added). Tests: both pages answer 200, and the phase 1 tests are unchanged. Agent: implementer.
+Phase 1 is released on its own when it is ready (T6). Phase 2 development may start before T6 is deployed, on the same branch or a branch from it. Phase 2 is released later (T13), when you decide.
+
+- **T7.** New page skeleton in `app/v2/` (`layout.py`, `callbacks.py`, `figures.py`, `texts.py`, TSP structure), mounted at `/app/nuki/v2/` on the same server, with links between the two pages. Phase 1's `app.py` stays as it is (only the link is added). Tests: both pages answer 200, and the phase 1 tests are unchanged. Agent: implementer.
 - **T8.** Daily/Full switch: `/api/v2/measurements/daily` in the connector (3-year chunks), daily figures with a min/max band; Full mode thinned (`rawseries.thin`, about 2000 points per series) and refetched for the zoom window (`relayoutData`). API effect: the default view drops to 1 small daily request set; Full adds 1 bounded raw set per zoom. Agent: implementer.
 - **T9.** One figure with linked x axes for all panels (ground temperature, air temperature, humidity, pressure, one row per inclination angle with its own scale, heading, sensor temperature, battery). Agent: implementer.
 - **T10.** Ground temperature profile with day slider (daily mean against depth, min/max shaded). Agent: implementer.
