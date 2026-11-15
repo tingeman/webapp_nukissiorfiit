@@ -235,6 +235,18 @@ Phase 1 is released on its own (T6). Phase 2 is developed on `agent-api-v2-phase
 - Agent: implementer
 - Deployment impact: none
 
+### T17. Faster first page load (decided 2026-11-15)
+- Problem: on a cold cache the v2 page builds the mast list from 7 sequential metadata requests (`/v1/metadata` about 2 s, 6 x `/v2/metadata?station=` about 4 s locally) before the dropdowns fill.
+- Changes (v2 client and page only; phase 1 untouched):
+  1. Mast list from `/v1/metadata` alone (stations matching `NUKI_STATION_PATTERN`, grouped by name).
+  2. Logger list and period from `/v2/metadata?station=` of the selected mast's stations only (1, or 2 for Mast 9), on demand.
+  3. In the same pass, a background thread in the worker fetches the v2 metadata of the other Nuki stations, one at a time, so another mast is instant; once all are cached, the mast list leaves out masts without data again (the next page load).
+  4. Stale-while-revalidate: metadata older than 10 minutes is still served while a background thread refreshes it (started by a request, so an idle worker makes no requests; at most one refresh at a time per key; a failed refresh keeps the old data and retries on the next request). A cold cache still blocks on its first request. Threads are started lazily after fork (gunicorn preload).
+- API: the same requests as before (1 + 6 small metadata requests per worker per 10 minutes, sequential), but out of the user's path; the first visitor per worker waits for `/v1/metadata` plus 1-2 `/v2/metadata`.
+- Validation: unit tests (request order and counts, no blocking on stale data, one refresh at a time, failure keeps old data, background warm-up), full suite.
+- Agent: implementer
+- Deployment impact: none
+
 ### T14. Release phase 2 alongside phase 1 (you)
 - Before: merge dtu_sus_web_server `agent-fixes` (`396cc0a`, nginx `proxy_read_timeout 120s` for `/app/nuki/`) into its `develop/main` and deploy nginx (`playbook_install_nginx.yml`); check with `curl -sI https://arctic.sustain.dtu.dk/app/nuki/` that the page still answers.
 - As T6, with the tag on `develop/main` after `agent-api-v2-phase2` is merged (with your permission). Then check `/app/nuki/v2/` on the server: Daily load times, a Full zoom, an All-loggers download for Mast 6, and the API log for the request counts in the table above.
