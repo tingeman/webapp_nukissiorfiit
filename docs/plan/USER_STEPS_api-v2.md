@@ -63,13 +63,13 @@ ansible-playbook -kK -i hosts playbook_install_webapp_nuki.yml -v --ask-vault-pa
 
 ### 2.4 Check production
 
-- [ ] Done
+- [x] Done
 
 The host commands and browser checks are in dtu_sus_web_server `USER_STEPS_api-v2.md`, step 3.
 
 ### 2.5 Fast-forward webapp_nukissiorfiit's `main` to the tag
 
-- [ ] Done
+- [x] Done
 
 The tag `2026.2` lives in this app repository (webapp_nukissiorfiit), not in dtu_sus_web_server; that repository's `main` is step 4 of its own USER_STEPS. The first command checks that it is a fast-forward.
 
@@ -79,13 +79,13 @@ cd /mnt/c/thin/02_Code/python_web_apps/webapp_nukissiorfiit
 git merge-base --is-ancestor main 2026.2 && git branch -f main '2026.2^{commit}' && git push origin main develop/main
 ```
 
-`develop/main` is one commit ahead of the tag (the Dockerfile fix `5359623`, not in 2026.2 and not needed there); the push takes it along.
+`develop/main` is two commits ahead of the tag (the Dockerfile fixes `5359623` and `50037ad`, dev and build only, not needed in 2026.2); the push takes them along.
 
 No env change is needed for phase 1: the `/api/v1` form of `BACKEND_API_BASE_URL` keeps working (one WARNING at start), and the new variables have defaults. **Keep the `/api/v1` form**: the nuki playbook's post-check requests `<BACKEND_API_BASE_URL>/metadata`, which fails with the root form (dtu_sus_web_server `USER_STEPS_api-v2.md`, Notes).
 
 ### 2.6 Remove the phase 1 worktree
 
-- [ ] Done
+- [x] Done
 
 Stops your phase 1 dev app and removes the worktree (the branch `agent-api-v2` stays).
 
