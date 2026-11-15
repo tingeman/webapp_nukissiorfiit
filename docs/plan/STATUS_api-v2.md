@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released and deployed as 2026.2 (`655aa0a`) 2026-11-15; open: production checks, `main` fast-forward, nginx deploy (USER_STEPS steps 2c, 3). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T13 done; T16 (your review fixes) done 2026-11-15; T17 (faster first load) done; then your second look (USER_STEPS step 4), then T14 on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 (2026.2) deployed and checked. Phase 2 (T8-T13, T16, T17) tagged 2026.3 at `9a95a5a` and pushed 2026-11-15 (T14 steps 5.1-5.2, before the review); not built. Next, all yours (USER_STEPS, table at the top): second look (step 4), nginx deploy (step 3), then build, deploy, `main` (5.3-5.5). Review findings: fix on `agent-api-v2-phase2`, release as 2026.4.
 
 ## Done
 
