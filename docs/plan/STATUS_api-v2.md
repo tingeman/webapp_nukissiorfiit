@@ -4,7 +4,7 @@ Plan: [PLAN_api-v2.md](PLAN_api-v2.md). Your steps: [USER_STEPS_api-v2.md](USER_
 
 ## Now
 
-Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15. Next: **T6 (you)**, the release. Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T10 done; next T11 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
+Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15; T6 released as 2026.2 (`655aa0a`, deploy by you). Phase 2 approved 2026-11-15 (plan, "Phase 2 design" and T8-T15); T8-T11 done; next T12 (implementer) on `agent-api-v2-phase2` (from `agent-api-v2`; merge `agent-api-v2` into it when phase 1 changes).
 
 ## Done
 
@@ -17,6 +17,9 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15. Ne
 - T5 2026-11-15 (you, local backend): 5 masts with the expected loggers; default ranges have data; inclination Roll/Pitch (Tekbox) and X/Y (Campbell); pressure about 100 kPa for both; 1-3 contiguous `/raw` chunks per update (a picker edit of start and end is 2 updates); backend paused: "Backend request timed out" after the read timeout, no retry and no second GET; nginx stopped: 2 connect retries, then "An unknown error occurred"; API time for one Tekbox year (Mast 6) 0.5-1.4 s, 27-33 KB gzip (plan estimate was about 1 MB: the real data is much sparser)
 - Phase 1 fix 2026-11-15 (on `agent-api-v2`, your request): an unreachable backend shows "Backend not reachable" (`BackendUnreachable`, a RuntimeError), logged without a traceback; phase 1 suite 103 passed (`655aa0a`), merged into the phase 2 branch (`3d547be`)
 - T10 2026-11-15: profile panel (`app/v2/profile.py`): day slider over every loaded day, Day min/max band, annual envelope via `trumpet.trumpet` on a 365-day window (TSP's 90 % rule), or both; compact `profile` store; day marker patched onto the figure; Full makes 1 raw then 1 daily request, in sequence; suite 217 passed (`af2206c`)
+- T11 2026-11-15: All loggers (`app/v2/join.py`): join within one station by series, datatype, unit (and depth), each logger fetched for its own part of the range, one logger at a time, dashed change markers, Mast 9 stations in separate legend groups, profile per day from one station; suite 247 passed (`ed5a14e`)
+- T6 2026-11-15 (you): tag 2026.2 on `develop/main` (`655aa0a`), built and tested with build_image.sh (tarball e8c35fb0...), releases.yml updated
+- Dockerfile fix 2026-11-15: unused `ENV DASH_DEBUG_MODE` (legacy syntax warning) removed on `agent-fixes` (`5359623`, from `develop/main`, suite 103 passed); not merged
 - T4 2026-11-15: env template, README and cross-repo TODOs (`00a2f98`)
 
 ## Open questions
@@ -31,6 +34,7 @@ Phase 1 approved 2026-11-15, code done (T1-T4). T5 checked by you 2026-11-15. Ne
 ## Notes for the next session
 
 - T8 choices: `API_TIMEOUT` has no seconds field (also used for 504); daily series keep only days with count > 0; `Selected.unit` holds the converted unit (details keep the API's); an empty selection returns `[]`; an invalid logger value raises `ValueError`; metadata caches are per `Client` instance, so T9 creates one client per process at import.
+- T11 choices: a logger is asked only for its catalogue period within the range (the newest minutes may lag by the 10-min cache); a zoom into the gap between loggers makes no request; chunks of one logger may still run 2 at a time; on a day both loggers recorded, the profile takes the later logger.
 - T9 choices: default mast = first in catalogue order (Mast 6); a range change reloads at once (no Load button, `updatemode="bothdates"`); the classic page has no assets folder, so it loads no v2 CSS (tested); `test_pages.test_callbacks_apart` now checks callback modules, since both pages have a `logger.options/value` output.
 
 - Phase 2 runs side by side with phase 1: a second Dash app at `/app/nuki/v2/` with links both ways, switch-over T15 (decided 2026-11-15). Phase 1 is released on its own when ready (T6). Phase 2 development (T7+) may start before T6 is deployed. Phase 2 is a free redesign; only the phase 1 page must stay available and unchanged.
