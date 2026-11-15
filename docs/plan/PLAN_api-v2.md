@@ -228,6 +228,7 @@ Phase 1 is released on its own (T6). Phase 2 is developed on `agent-api-v2-phase
   4. Daily/Full switch keeps the zoom (as webapp_grl_tsp `24872f4`): Daily to Full while zoomed loads raw for the visible window (at most one year) and keeps the x range; Full to Daily keeps the x range.
   5. Download: the "All" checkbox reads "Toggle all recording devices at this station".
   6. Layout: on wide screens the profile card takes half the width, the download card (redesigned to fit) the other half; stacked on narrow screens.
+  7. A heading above the figure, written by the same callback as the figure, names the drawn data: mast, station, logger (or All loggers), Daily/Full, period. The profile label names mast and logger too. A failed load clears the figure and shows the error with the selection, so no stale plots pass as the current selection.
 - API: no new request pattern (the switch with a zoom asks for less than the whole range).
 - Validation: full `bash tests/run.sh webapp_nuki:local`; look at the page in a browser.
 - Agent: implementer
